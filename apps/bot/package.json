@@ -1,0 +1,26 @@
+{
+  "name": "@discord-link-hunter/bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "register": "tsx src/register-commands.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@discord-link-hunter/config": "*",
+    "@discord-link-hunter/core": "*",
+    "@discord-link-hunter/db": "*",
+    "@discord-link-hunter/research": "*",
+    "discord.js": "^14.17.3",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
+
