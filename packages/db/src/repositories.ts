@@ -1,6 +1,7 @@
 import {
   CommunityMetadata,
   DiscoveredInvite,
+  identifySourcePlatform,
   RankedInviteResult,
   SearchJob,
   SearchJobParams,
@@ -349,6 +350,7 @@ export class PostgresRepository implements LinkHunterRepository {
         estimatedRequests: job.estimatedRequests ?? 0,
         estimatedCredits: job.estimatedCredits ?? 0,
         dryRunExplanation: job.dryRunExplanation ?? null,
+        languageFilterNotice: job.languageFilterNotice ?? null,
         createdAt: new Date(job.createdAt),
         startedAt: job.startedAt ? new Date(job.startedAt) : null,
         completedAt: job.completedAt ? new Date(job.completedAt) : null,
@@ -363,6 +365,7 @@ export class PostgresRepository implements LinkHunterRepository {
           estimatedRequests: job.estimatedRequests ?? 0,
           estimatedCredits: job.estimatedCredits ?? 0,
           dryRunExplanation: job.dryRunExplanation ?? null,
+          languageFilterNotice: job.languageFilterNotice ?? null,
           startedAt: job.startedAt ? new Date(job.startedAt) : null,
           completedAt: job.completedAt ? new Date(job.completedAt) : null,
         },
@@ -416,6 +419,7 @@ export class PostgresRepository implements LinkHunterRepository {
       estimatedRequests: r.estimatedRequests ?? undefined,
       estimatedCredits: r.estimatedCredits ?? undefined,
       dryRunExplanation: r.dryRunExplanation ?? undefined,
+      languageFilterNotice: r.languageFilterNotice ?? undefined,
       createdAt: r.createdAt.toISOString(),
       startedAt: r.startedAt?.toISOString() ?? null,
       completedAt: r.completedAt?.toISOString() ?? null,
@@ -452,6 +456,7 @@ export class PostgresRepository implements LinkHunterRepository {
       estimatedRequests: r.estimatedRequests ?? undefined,
       estimatedCredits: r.estimatedCredits ?? undefined,
       dryRunExplanation: r.dryRunExplanation ?? undefined,
+      languageFilterNotice: r.languageFilterNotice ?? undefined,
       createdAt: r.createdAt.toISOString(),
       startedAt: r.startedAt?.toISOString() ?? null,
       completedAt: r.completedAt?.toISOString() ?? null,
@@ -602,12 +607,16 @@ export class PostgresRepository implements LinkHunterRepository {
     const sourcesByCode = new Map<string, DiscoveredInvite[]>();
     for (const sr of sourceRows) {
       const list = sourcesByCode.get(sr.inviteCode) || [];
+      const platformConfig = identifySourcePlatform(sr.source.domain || sr.source.url);
       list.push({
         rawUrl: sr.source.url,
         code: sr.inviteCode,
         canonicalUrl: `https://discord.gg/${sr.inviteCode}`,
         sourceUrl: sr.source.url,
         sourceDomain: sr.source.domain ?? undefined,
+        sourcePlatform: platformConfig?.id || (sr.source.domain ? 'general_web' : undefined),
+        sourcePlatformName: platformConfig?.name || sr.source.domain || undefined,
+        sourceCategory: platformConfig?.category || (sr.source.domain ? 'general_web' : undefined),
         provider: (sr.source.sourceType as any) || 'unknown',
         discoveredAt: sr.source.discoveredAt.toISOString(),
         contextSnippet: sr.contextSnippet ?? undefined,
@@ -714,6 +723,10 @@ export function getRepository(): LinkHunterRepository {
 
   if (databaseConfigured) {
     if (!isDatabaseConnectedSync()) {
+      if (process.env.NODE_ENV === 'test' || process.env.VITEST) {
+        _repoInstance = new InMemoryRepository();
+        return _repoInstance;
+      }
       throw new Error(
         'PostgreSQL is configured but has not been verified. ' +
         'Run the database connection test before initializing the repository.'

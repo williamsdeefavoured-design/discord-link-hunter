@@ -121,11 +121,14 @@ export class JobQueueManager {
       const {
         results,
         progress,
+        potentialLeads,
         dryRun,
         plannedQueries,
         estimatedRequests,
         estimatedCredits,
         dryRunExplanation,
+        languageFilterNotice,
+        providerUsage,
       } = await orchestrator.executeJob(job.params, async (currentProgress) => {
         await this.repo.updateJobProgress(jobId, currentProgress, 'running');
       });
@@ -133,15 +136,25 @@ export class JobQueueManager {
       // Record provider usage only when NOT a dry run
       if (!dryRun) {
         if (job.mode === 'live') {
-          if (config.SERPER_API_KEY) {
-            await this.repo.recordProviderUsage('serper', progress.queriesAttempted, progress.queriesAttempted);
-          } else if (config.TAVILY_API_KEY) {
-            await this.repo.recordProviderUsage('tavily', progress.queriesAttempted, progress.queriesAttempted);
+          // Record separate provider counts accurately
+          const usage = providerUsage || {};
+          let anyRecorded = false;
+          for (const [providerName, reqCount] of Object.entries(usage)) {
+            if (reqCount > 0) {
+              await this.repo.recordProviderUsage(providerName, reqCount, reqCount);
+              anyRecorded = true;
+            }
+          }
+          if (!anyRecorded && progress.queriesAttempted > 0) {
+            const fallbackProvider = config.SERPER_API_KEY ? 'serper' : 'tavily';
+            await this.repo.recordProviderUsage(fallbackProvider, progress.queriesAttempted, progress.queriesAttempted);
           }
         } else {
           await this.repo.recordProviderUsage('mock', progress.queriesAttempted, 0);
         }
       }
+
+      job.languageFilterNotice = languageFilterNotice;
 
       // Determine final status
       let finalStatus: SearchJob['status'] = 'completed';
@@ -158,6 +171,10 @@ export class JobQueueManager {
             finalStatus = 'partial';
           } else if (progress.queriesFailed >= progress.queriesAttempted && progress.queriesAttempted > 0) {
             finalStatus = 'failed';
+            job.errorDetails = `All search providers failed: ${progress.providerErrors
+              .map((e) => `[${e.provider}] ${e.error}`)
+              .slice(0, 3)
+              .join('; ')}`;
           }
         }
       }
@@ -165,6 +182,7 @@ export class JobQueueManager {
       job.status = finalStatus;
       job.progress = progress;
       job.results = results;
+      job.potentialLeads = potentialLeads;
       job.completedAt = new Date().toISOString();
 
       await this.repo.saveResults(jobId, results);

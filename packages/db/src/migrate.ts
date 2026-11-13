@@ -87,6 +87,7 @@ export async function runMigrations() {
         estimated_requests INTEGER DEFAULT 0,
         estimated_credits INTEGER DEFAULT 0,
         dry_run_explanation TEXT,
+        language_filter_notice TEXT,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         started_at TIMESTAMPTZ,
         completed_at TIMESTAMPTZ
@@ -138,6 +139,7 @@ export async function runMigrations() {
     await sql`ALTER TABLE search_jobs ADD COLUMN IF NOT EXISTS estimated_requests INTEGER DEFAULT 0;`;
     await sql`ALTER TABLE search_jobs ADD COLUMN IF NOT EXISTS estimated_credits INTEGER DEFAULT 0;`;
     await sql`ALTER TABLE search_jobs ADD COLUMN IF NOT EXISTS dry_run_explanation TEXT;`;
+    await sql`ALTER TABLE search_jobs ADD COLUMN IF NOT EXISTS language_filter_notice TEXT;`;
     await sql`ALTER TABLE search_job_results ADD COLUMN IF NOT EXISTS is_simulated BOOLEAN DEFAULT FALSE;`;
 
     // Indexes for fast querying

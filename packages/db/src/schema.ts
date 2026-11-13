@@ -68,6 +68,7 @@ export const searchJobs = pgTable('search_jobs', {
   estimatedRequests: integer('estimated_requests').default(0),
   estimatedCredits: integer('estimated_credits').default(0),
   dryRunExplanation: text('dry_run_explanation'),
+  languageFilterNotice: text('language_filter_notice'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   startedAt: timestamp('started_at', { withTimezone: true }),
   completedAt: timestamp('completed_at', { withTimezone: true }),

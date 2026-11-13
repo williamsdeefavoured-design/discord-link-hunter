@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 export const SUPPORTED_LANGUAGES = ['en', 'de', 'es', 'pt', 'fr', 'ar'] as const;
 export type LanguageCode = (typeof SUPPORTED_LANGUAGES)[number];
+export type DetectedLanguage = LanguageCode | 'unknown';
 
 export const TRADING_TOPICS = [
   'forex',
@@ -40,6 +41,51 @@ export const JOB_STATUSES = [
 ] as const;
 export type JobStatus = (typeof JOB_STATUSES)[number];
 
+export type SourceCategory =
+  | 'discussion_forum'
+  | 'social_network'
+  | 'newsletter_publishing'
+  | 'creator_platform'
+  | 'publishing_platform'
+  | 'q_and_a'
+  | 'charting_community'
+  | 'microblogging'
+  | 'trading_blogs'
+  | 'trading_forums'
+  | 'general_web';
+
+export type SourceAccessMethod = 'public_search' | 'authorized_api';
+
+export interface ResearchSourceConfig {
+  id: string;
+  name: string;
+  category: SourceCategory;
+  domains: string[];
+  accessMethod: SourceAccessMethod;
+  enabled: boolean;
+  searchOperatorTemplate: string;
+  rateLimitPerMinute?: number;
+  requiresAuth?: boolean;
+  apiDocsUrl?: string;
+  notes?: string;
+}
+
+export interface PotentialCommunityLead {
+  id: string;
+  sourcePlatform: string;
+  sourcePlatformName: string;
+  sourceCategory: SourceCategory;
+  sourceUrl: string;
+  sourceDomain: string;
+  title: string;
+  snippet: string;
+  topic: TradingTopic;
+  language: LanguageCode;
+  discoveredAt: string;
+  hasConfirmedInvite: false;
+  reason: string;
+}
+
 export interface CommunityMetadata {
   id: string; // Discord guild ID
   name: string;
@@ -60,6 +106,9 @@ export interface DiscoveredInvite {
   canonicalUrl: string;
   sourceUrl?: string;
   sourceDomain?: string;
+  sourcePlatform?: string;
+  sourcePlatformName?: string;
+  sourceCategory?: SourceCategory;
   provider: 'serper' | 'tavily' | 'mock' | 'manual';
   discoveredAt: string;
   contextSnippet?: string;
@@ -97,7 +146,7 @@ export interface RankedInviteResult {
   score: number;
   scoreBreakdown: ScoreBreakdown;
   detectedTopics: TradingTopic[];
-  detectedLanguage: LanguageCode;
+  detectedLanguage: DetectedLanguage;
   isVerifiedFact: boolean;
   isSimulated?: boolean;
 }
@@ -110,6 +159,7 @@ export interface SearchJobParams {
   minMembers?: number;
   sourcePreference?: 'all' | 'serper' | 'tavily';
   dryRun?: boolean;
+  targetPlatforms?: string[];
 }
 
 export interface SearchJobProgress {
@@ -124,6 +174,9 @@ export interface SearchJobProgress {
   validInvites: number;
   invalidInvites: number;
   restrictedOrUnverified: number;
+  languageFilteredOutCount?: number;
+  potentialLeadsCount?: number;
+  leadsWithoutInvite?: number;
   // Backwards compatibility aliases:
   queriesExecuted: number;
   invitesVerified: number;
@@ -136,6 +189,7 @@ export interface PlannedQueryItem {
   topic: TradingTopic;
   language: LanguageCode;
   priority: number;
+  platform?: string;
 }
 
 export interface SearchJob {
@@ -146,6 +200,7 @@ export interface SearchJob {
   status: JobStatus;
   progress: SearchJobProgress;
   results: RankedInviteResult[];
+  potentialLeads?: PotentialCommunityLead[];
   errorDetails?: string | null;
   createdAt: string;
   startedAt?: string | null;
@@ -155,4 +210,5 @@ export interface SearchJob {
   estimatedRequests?: number;
   estimatedCredits?: number;
   dryRunExplanation?: string;
+  languageFilterNotice?: string;
 }

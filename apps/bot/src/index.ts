@@ -9,7 +9,7 @@ import {
 } from '@discord-link-hunter/db';
 
 import { createBotClient } from './client.js';
-import { handleInteraction } from './commands.js';
+import { handleInteraction, handleButtonInteraction } from './commands.js';
 
 /**
  * Discord Link Hunter
@@ -81,43 +81,70 @@ async function startBot() {
     );
   });
 
-  // STEP 6: Process Discord slash commands
+  // STEP 6: Process Discord slash commands and button interactions
   client.on(Events.InteractionCreate, async (interaction) => {
-    if (!interaction.isChatInputCommand()) {
+    if (interaction.isChatInputCommand()) {
+      try {
+        await handleInteraction(interaction);
+      } catch (error: unknown) {
+        console.error(
+          `[Bot] Error executing command ${interaction.commandName}:`,
+          error
+        );
+
+        const content =
+          '⚠️ An unexpected error occurred while processing this command.';
+
+        try {
+          if (interaction.deferred) {
+            await interaction.editReply({ content });
+          } else if (interaction.replied) {
+            await interaction.followUp({
+              content,
+              ephemeral: true,
+            });
+          } else {
+            await interaction.reply({
+              content,
+              ephemeral: true,
+            });
+          }
+        } catch (replyError) {
+          console.error(
+            '[Bot] Unable to send error response:',
+            replyError
+          );
+        }
+      }
       return;
     }
 
-    try {
-      await handleInteraction(interaction);
-    } catch (error: unknown) {
-      console.error(
-        `[Bot] Error executing command ${interaction.commandName}:`,
-        error
-      );
-
-      const content =
-        '⚠️ An unexpected error occurred while processing this command.';
-
+    if (interaction.isButton()) {
       try {
-        if (interaction.deferred) {
-          await interaction.editReply({ content });
-        } else if (interaction.replied) {
-          await interaction.followUp({
-            content,
-            ephemeral: true,
-          });
-        } else {
-          await interaction.reply({
-            content,
-            ephemeral: true,
-          });
-        }
-      } catch (replyError) {
+        await handleButtonInteraction(interaction);
+      } catch (error: unknown) {
         console.error(
-          '[Bot] Unable to send error response:',
-          replyError
+          `[Bot] Error handling button interaction ${interaction.customId}:`,
+          error
         );
+
+        try {
+          if (interaction.deferred) {
+            await interaction.followUp({
+              content: '⚠️ An error occurred while updating the page.',
+              ephemeral: true,
+            });
+          } else if (!interaction.replied) {
+            await interaction.reply({
+              content: '⚠️ An error occurred while updating the page.',
+              ephemeral: true,
+            });
+          }
+        } catch {
+          // ignore
+        }
       }
+      return;
     }
   });
 

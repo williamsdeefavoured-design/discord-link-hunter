@@ -63,6 +63,27 @@ export class SerperAdapter implements SearchProvider {
       const statusCode = res.status;
       const durationMs = Date.now() - start;
 
+      let retryAfterSeconds: number | undefined;
+      const retryHeader = res.headers?.get ? res.headers.get('retry-after') : undefined;
+      if (retryHeader) {
+        const parsed = parseInt(retryHeader, 10);
+        if (!isNaN(parsed)) {
+          retryAfterSeconds = parsed;
+        }
+      }
+
+      if (statusCode === 401 || statusCode === 403) {
+        return {
+          provider: 'serper',
+          query,
+          items: [],
+          statusCode,
+          durationMs,
+          error: `Serper authentication failure (${statusCode}): invalid or forbidden credentials`,
+          isPermanentError: true,
+        };
+      }
+
       if (statusCode === 429) {
         return {
           provider: 'serper',
@@ -70,7 +91,8 @@ export class SerperAdapter implements SearchProvider {
           items: [],
           statusCode: 429,
           durationMs,
-          error: 'Serper rate limit exceeded (429)',
+          error: `Serper rate limit exceeded (429)${retryAfterSeconds ? ` - retry after ${retryAfterSeconds}s` : ''}`,
+          retryAfterSeconds,
         };
       }
 

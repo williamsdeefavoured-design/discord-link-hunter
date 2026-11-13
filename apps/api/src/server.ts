@@ -6,6 +6,7 @@ import { getConfig, getRedactedConfigSummary } from '@discord-link-hunter/config
 import {
   canonicalizeDiscordInvite,
   compareRankedResults,
+  DEFAULT_RESEARCH_SOURCES,
   LanguageCode,
   SUPPORTED_LANGUAGES,
   TradingTopic,
@@ -15,10 +16,11 @@ import {
 import {
   getRepository,
   JobQueueManager,
+  LinkHunterRepository,
   testDatabaseConnection,
 } from '@discord-link-hunter/db';
 
-export function buildServer(): FastifyInstance {
+export function buildServer(customRepo?: LinkHunterRepository): FastifyInstance {
   const app = fastify({
     logger: false,
   });
@@ -37,7 +39,7 @@ export function buildServer(): FastifyInstance {
     timeWindow: '1 minute',
   });
 
-  const repo = getRepository();
+  const repo = customRepo || getRepository();
   const queue = new JobQueueManager(repo);
 
   // Health check
@@ -70,6 +72,7 @@ export function buildServer(): FastifyInstance {
     depth: z.number().int().min(1).max(2).default(1),
     minMembers: z.number().int().optional(),
     dryRun: z.boolean().optional(),
+    targetPlatforms: z.array(z.string()).optional(),
     mode: z.enum(['mock', 'live']).optional(),
   });
 
@@ -172,6 +175,11 @@ export function buildServer(): FastifyInstance {
     });
   });
 
+  // Get configurable research sources
+  app.get('/api/sources', async () => {
+    return { sources: DEFAULT_RESEARCH_SOURCES };
+  });
+
   // Get job results with filtering
   app.get('/api/results/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -180,9 +188,11 @@ export function buildServer(): FastifyInstance {
       status?: string;
       topic?: string;
       language?: string;
+      platform?: string;
     };
 
     let results = await repo.getJobResults(id);
+    const job = await repo.getJob(id);
 
     if (query.minScore) {
       const minScore = parseInt(query.minScore, 10);
@@ -201,9 +211,35 @@ export function buildServer(): FastifyInstance {
       results = results.filter((r) => r.detectedLanguage === query.language);
     }
 
+    if (query.platform && query.platform !== 'all') {
+      const target = query.platform.toLowerCase();
+      results = results.filter((r) =>
+        r.sources.some(
+          (s) =>
+            s.sourcePlatform?.toLowerCase() === target ||
+            s.sourceDomain?.toLowerCase().includes(target)
+        )
+      );
+    }
+
     results.sort(compareRankedResults);
 
-    return { jobId: id, count: results.length, results };
+    let potentialLeads = job?.potentialLeads || [];
+    if (query.platform && query.platform !== 'all') {
+      const target = query.platform.toLowerCase();
+      potentialLeads = potentialLeads.filter(
+        (lead) =>
+          lead.sourcePlatform.toLowerCase() === target ||
+          lead.sourceDomain.toLowerCase().includes(target)
+      );
+    }
+
+    return {
+      jobId: id,
+      count: results.length,
+      results,
+      potentialLeads,
+    };
   });
 
   // Export results as CSV or JSON

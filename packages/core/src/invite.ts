@@ -1,4 +1,5 @@
 import { DiscoveredInvite, InviteStatus, VerifiedInvite } from './types.js';
+import { identifySourcePlatform } from './sources.js';
 
 // Regex patterns for matching Discord invitations
 // Match discord.gg/CODE, discord.com/invite/CODE, discordapp.com/invite/CODE
@@ -44,6 +45,11 @@ export function extractDiscordInvites(
     }
   }
 
+  const platformConfig = sourceUrl ? identifySourcePlatform(domain || sourceUrl) : undefined;
+  const sourcePlatform = platformConfig ? platformConfig.id : domain ? 'general_web' : undefined;
+  const sourcePlatformName = platformConfig ? platformConfig.name : domain || undefined;
+  const sourceCategory = platformConfig ? platformConfig.category : domain ? 'general_web' : undefined;
+
   const matches = text.matchAll(DISCORD_INVITE_REGEX);
   for (const match of matches) {
     const rawUrl = match[0];
@@ -64,6 +70,9 @@ export function extractDiscordInvites(
       canonicalUrl: `https://discord.gg/${rawCode}`,
       sourceUrl: sourceUrl || undefined,
       sourceDomain: domain || undefined,
+      sourcePlatform,
+      sourcePlatformName,
+      sourceCategory,
       provider,
       discoveredAt: new Date().toISOString(),
       contextSnippet,
@@ -333,6 +342,106 @@ const MOCK_COMMUNITIES: Record<
     approximatePresenceCount: 630,
     features: ['COMMUNITY'],
     channelName: 'acoes-ibov',
+  },
+  'fx-reddit-lounge': {
+    status: 'valid',
+    statusReason: 'Simulated Reddit r/Forex community',
+    name: 'Reddit Forex Lounge',
+    description: 'The official trading discussion lounge from r/Forex with daily market recaps.',
+    approximateMemberCount: 14200,
+    approximatePresenceCount: 2200,
+    features: ['COMMUNITY'],
+    channelName: 'daily-discussion',
+  },
+  'tv-scalpers': {
+    status: 'valid',
+    statusReason: 'Simulated TradingView community',
+    name: 'TradingView PineScript & Scalpers',
+    description: 'Forex technical analysis ideas, Pine script indicators, and scalping setup signals.',
+    approximateMemberCount: 18500,
+    approximatePresenceCount: 3100,
+    features: ['COMMUNITY', 'DISCOVERABLE'],
+    channelName: 'pine-scripts',
+  },
+  'substack-macro': {
+    status: 'valid',
+    statusReason: 'Simulated Substack newsletter community',
+    name: 'Macro Alpha & Gold Newsletter Community',
+    description: 'Substack macroeconomic research, bond yields, and gold trading setups.',
+    approximateMemberCount: 3200,
+    approximatePresenceCount: 450,
+    features: ['COMMUNITY'],
+    channelName: 'macro-briefs',
+  },
+  'patreon-traders': {
+    status: 'valid',
+    statusReason: 'Simulated Patreon creator community',
+    name: 'Patreon Pro Trading Signals',
+    description: 'Tier-supporter discord server for live trading calls and trade setups.',
+    approximateMemberCount: 1900,
+    approximatePresenceCount: 310,
+    features: ['COMMUNITY'],
+    channelName: 'vip-alerts',
+  },
+  'x-trading-desk': {
+    status: 'valid',
+    statusReason: 'Simulated Twitter/X trader community',
+    name: 'X Day Trading Desk',
+    description: 'Twitter / X community for day trading stocks, futures, and indices.',
+    approximateMemberCount: 5600,
+    approximatePresenceCount: 890,
+    features: ['COMMUNITY'],
+    channelName: 'market-flow',
+  },
+  'medium-crypto-hub': {
+    status: 'valid',
+    statusReason: 'Simulated Medium publication community',
+    name: 'Medium Crypto & DeFi Publications',
+    description: 'Writers and researchers community discussing cryptocurrency and trading.',
+    approximateMemberCount: 2700,
+    approximatePresenceCount: 380,
+    features: ['COMMUNITY'],
+    channelName: 'crypto-articles',
+  },
+  'quora-options-desk': {
+    status: 'valid',
+    statusReason: 'Simulated Quora options community',
+    name: 'Quora Options & Equity Community',
+    description: 'Q&A answers and options trading strategies community.',
+    approximateMemberCount: 2400,
+    approximatePresenceCount: 340,
+    features: ['COMMUNITY'],
+    channelName: 'options-qa',
+  },
+  'stocktwits-futures': {
+    status: 'valid',
+    statusReason: 'Simulated Stocktwits futures community',
+    name: 'Stocktwits Futures Stream',
+    description: 'Futures day traders, micro ES/NQ levels and market chatter.',
+    approximateMemberCount: 6800,
+    approximatePresenceCount: 950,
+    features: ['COMMUNITY'],
+    channelName: 'futures-room',
+  },
+  'wp-forex-traders': {
+    status: 'valid',
+    statusReason: 'Simulated WordPress trading blog community',
+    name: 'WordPress Forex Blog Network',
+    description: 'Forex trading blog authors and daily technical analysis contributors.',
+    approximateMemberCount: 1800,
+    approximatePresenceCount: 260,
+    features: ['COMMUNITY'],
+    channelName: 'fx-blog-posts',
+  },
+  'ff-scalping-crew': {
+    status: 'valid',
+    statusReason: 'Simulated ForexFactory forum community',
+    name: 'ForexFactory Live Scalpers',
+    description: 'ForexFactory community thread scalping sessions and news trading.',
+    approximateMemberCount: 8900,
+    approximatePresenceCount: 1350,
+    features: ['COMMUNITY'],
+    channelName: 'london-session',
   },
   'expired-test': {
     status: 'expired_or_revoked',

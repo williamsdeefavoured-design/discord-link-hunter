@@ -16,6 +16,7 @@ function ResultsContent() {
   const [jobMode, setJobMode] = useState<'mock' | 'live' | null>(null);
   const [jobIsSimulated, setJobIsSimulated] = useState<boolean>(false);
   const [results, setResults] = useState<RankedInviteResult[]>([]);
+  const [potentialLeads, setPotentialLeads] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [executing, setExecuting] = useState(false);
@@ -23,8 +24,9 @@ function ResultsContent() {
 
   // Filters
   const [minScore, setMinScore] = useState(0);
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('valid');
   const [languageFilter, setLanguageFilter] = useState('all');
+  const [platformFilter, setPlatformFilter] = useState('all');
 
   // Resolve active jobId if not provided in URL
   useEffect(() => {
@@ -65,16 +67,19 @@ function ResultsContent() {
         if (minScore > 0) params.append('minScore', minScore.toString());
         if (statusFilter !== 'all') params.append('status', statusFilter);
         if (languageFilter !== 'all') params.append('language', languageFilter);
+        if (platformFilter !== 'all') params.append('platform', platformFilter);
 
         const qs = params.toString();
         if (qs) url += `?${qs}`;
 
-        const result = await apiFetch<{ results: RankedInviteResult[] }>(url);
+        const result = await apiFetch<{ results: RankedInviteResult[]; potentialLeads?: any[] }>(url);
         if (result.ok && result.data?.results) {
           setResults(result.data.results);
+          setPotentialLeads(result.data.potentialLeads || []);
           setErrorMessage(null);
         } else {
           setResults([]);
+          setPotentialLeads([]);
           if (!result.ok) {
             setErrorMessage(result.error || 'Failed to load results');
           }
@@ -88,7 +93,7 @@ function ResultsContent() {
     };
 
     fetchResults();
-  }, [jobId, minScore, statusFilter, languageFilter]);
+  }, [jobId, minScore, statusFilter, languageFilter, platformFilter]);
 
   const handleExecuteLiveSearch = async () => {
     if (!job) return;
@@ -163,6 +168,13 @@ function ResultsContent() {
       {errorMessage && (
         <div className="p-3 rounded-lg border border-amber-500/20 bg-amber-500/10 text-amber-400 text-xs">
           ⚠️ {errorMessage}
+        </div>
+      )}
+
+      {job?.languageFilterNotice && (
+        <div className="p-3.5 rounded-xl border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 text-xs flex items-center space-x-2">
+          <Globe2 className="w-4 h-4 shrink-0 text-indigo-400" />
+          <span>{job.languageFilterNotice}</span>
         </div>
       )}
 
@@ -271,9 +283,10 @@ function ResultsContent() {
             onChange={(e) => setStatusFilter(e.target.value)}
             className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-white focus:outline-none"
           >
-            <option value="all">All Statuses</option>
-            <option value="valid">Valid Active Only</option>
+            <option value="valid">Valid Active (Default)</option>
+            <option value="all">All Statuses (Include Inactive)</option>
             <option value="expired_or_revoked">Expired / Revoked</option>
+            <option value="unknown">Unknown / Unverified</option>
           </select>
         </div>
 
@@ -293,6 +306,27 @@ function ResultsContent() {
             <option value="ar">Arabic (ar)</option>
           </select>
         </div>
+
+        <div className="flex items-center space-x-1.5">
+          <label className="text-slate-400">Platform:</label>
+          <select
+            value={platformFilter}
+            onChange={(e) => setPlatformFilter(e.target.value)}
+            className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-white focus:outline-none"
+          >
+            <option value="all">All Sources</option>
+            <option value="reddit">Reddit</option>
+            <option value="tradingview">TradingView</option>
+            <option value="substack">Substack</option>
+            <option value="patreon">Patreon</option>
+            <option value="x_twitter">X (Twitter)</option>
+            <option value="medium">Medium</option>
+            <option value="quora">Quora</option>
+            <option value="stocktwits">Stocktwits</option>
+            <option value="trading_blogs">Trading Blogs</option>
+            <option value="trading_forums">Trading Forums</option>
+          </select>
+        </div>
       </div>
 
       {/* Results Table */}
@@ -309,6 +343,7 @@ function ResultsContent() {
               <tr>
                 <th className="py-3 px-4">Rank / Score</th>
                 <th className="py-3 px-4">Community / Server</th>
+                <th className="py-3 px-4">Sources / Provenance</th>
                 <th className="py-3 px-4">Status</th>
                 <th className="py-3 px-4">Language & Topics</th>
                 <th className="py-3 px-4">Members</th>
@@ -344,6 +379,35 @@ function ResultsContent() {
                           {res.invite.community.description}
                         </p>
                       )}
+                    </td>
+
+                    <td className="py-3 px-4 max-w-xs">
+                      <div className="flex flex-wrap items-center gap-1">
+                        {res.sources && res.sources.length > 0 ? (
+                          res.sources.map((src, sIdx) => {
+                            const pName = src.sourcePlatformName || src.sourcePlatform || src.sourceDomain || 'Web';
+                            return src.sourceUrl ? (
+                              <a
+                                key={sIdx}
+                                href={src.sourceUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 text-[10px] border border-sky-500/20 transition"
+                                title={src.contextSnippet || src.sourceUrl}
+                              >
+                                <span>{pName}</span>
+                                <ExternalLink className="w-2.5 h-2.5 opacity-60" />
+                              </a>
+                            ) : (
+                              <span key={sIdx} className="inline-flex items-center px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 text-[10px]">
+                                {pName}
+                              </span>
+                            );
+                          })
+                        ) : (
+                          <span className="text-slate-500 italic text-[11px]">Direct</span>
+                        )}
+                      </div>
                     </td>
 
                     <td className="py-3 px-4 whitespace-nowrap">
@@ -420,6 +484,76 @@ function ResultsContent() {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Potential Community Leads Section (Without Confirmed Discord Invites) */}
+      {potentialLeads.length > 0 && (
+        <div className="space-y-3 pt-6 border-t border-slate-800/80">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center space-x-2">
+              <span className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 text-xs font-semibold">
+                POTENTIAL COMMUNITY LEADS ({potentialLeads.length})
+              </span>
+              <span className="text-xs text-slate-400">
+                Discussions discovered on public platforms without confirmed direct Discord invite links.
+              </span>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/20">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-950/60 border-b border-slate-800 text-slate-400 uppercase tracking-wider font-semibold">
+                <tr>
+                  <th className="py-2.5 px-4">Platform</th>
+                  <th className="py-2.5 px-4">Discussion Title / Lead</th>
+                  <th className="py-2.5 px-4">Topic / Lang</th>
+                  <th className="py-2.5 px-4">Status & Reason</th>
+                  <th className="py-2.5 px-4 text-right">Inspect Source</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/40">
+                {potentialLeads.map((lead: any) => (
+                  <tr key={lead.id} className="hover:bg-slate-800/20 transition">
+                    <td className="py-2.5 px-4 whitespace-nowrap">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded bg-sky-500/10 text-sky-400 border border-sky-500/20 text-[11px] font-medium">
+                        {lead.sourcePlatformName || lead.sourcePlatform}
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-4 max-w-sm">
+                      <div className="font-semibold text-slate-200 truncate">{lead.title}</div>
+                      <p className="text-[11px] text-slate-400 line-clamp-1 mt-0.5">{lead.snippet}</p>
+                    </td>
+                    <td className="py-2.5 px-4 whitespace-nowrap">
+                      <div className="flex items-center space-x-1">
+                        <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px] uppercase font-mono">
+                          {lead.language}
+                        </span>
+                        <span className="px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-300 text-[10px]">
+                          {lead.topic}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="py-2.5 px-4 text-slate-400 text-[11px]">
+                      <span className="text-amber-400/90 font-medium">No Direct Invite</span>
+                      <p className="text-[10px] text-slate-500 truncate max-w-xs">{lead.reason}</p>
+                    </td>
+                    <td className="py-2.5 px-4 text-right whitespace-nowrap">
+                      <a
+                        href={lead.sourceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center space-x-1 px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-medium border border-slate-700 transition"
+                      >
+                        <span>View Thread</span>
+                        <ExternalLink className="w-2.5 h-2.5" />
+                      </a>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
         </>

@@ -4,17 +4,196 @@ import {
   EmbedBuilder,
   SlashCommandBuilder,
   AttachmentBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ButtonInteraction,
 } from 'discord.js';
 import { getConfig } from '@discord-link-hunter/config';
 import {
   canonicalizeDiscordInvite,
   LanguageCode,
+  RankedInviteResult,
+  SearchJob,
   SUPPORTED_LANGUAGES,
   TradingTopic,
   TRADING_TOPICS,
   verifyDiscordInvite,
 } from '@discord-link-hunter/core';
 import { getRepository, JobQueueManager } from '@discord-link-hunter/db';
+
+export function buildResultsPageEmbed(
+  jobId: string,
+  results: RankedInviteResult[],
+  page: number,
+  totalPages: number,
+  job?: SearchJob | null
+): EmbedBuilder {
+  const startIndex = (page - 1) * 5;
+  const pageResults = results.slice(startIndex, startIndex + 5);
+
+  const title = job?.params?.topics?.length
+    ? `🎯 Hunt Results: ${job.params.topics.join(', ').toUpperCase()} (${(job.params.languages || ['en']).join(', ').toUpperCase()})`
+    : `🎯 Search Results: ${jobId}`;
+
+  let description =
+    `Job ID: \`${jobId}\`\n` +
+    `Found **${results.length}** ranked communities (showing page ${page} of ${totalPages}).`;
+
+  if (job?.languageFilterNotice) {
+    description += `\n⚠️ *${job.languageFilterNotice}*`;
+  }
+
+  const embed = new EmbedBuilder()
+    .setColor(0x5865f2)
+    .setTitle(title)
+    .setDescription(description)
+    .setFooter({
+      text: `Page ${page} of ${totalPages} • Mode: ${job?.mode || 'live'} • View full details in dashboard`,
+    })
+    .setTimestamp();
+
+  pageResults.forEach((res, i) => {
+    const rank = startIndex + i + 1;
+    const serverName = res.invite.community?.name || res.invite.code;
+    const members = res.invite.community?.approximateMemberCount
+      ? ` (${res.invite.community.approximateMemberCount.toLocaleString()} members)`
+      : '';
+    const link = `[${serverName}](${res.invite.canonicalUrl})`;
+    const explanations =
+      res.scoreBreakdown?.explanations?.slice(0, 2).join(' • ') ||
+      'Verified invitation';
+
+    const sourcePlatforms = Array.from(
+      new Set(res.sources?.map((s) => s.sourcePlatformName || s.sourcePlatform).filter(Boolean))
+    );
+    const sourcesText = sourcePlatforms.length > 0 ? ` | Via: \`${sourcePlatforms.join(', ')}\`` : '';
+
+    embed.addFields({
+      name: `#${rank} • Score ${res.score}/100: ${serverName}`,
+      value:
+        `${link}${members}\n` +
+        `Status: \`${res.invite.status}\` | Lang: \`${res.detectedLanguage}\`${sourcesText}\n` +
+        `*${explanations}*`,
+    });
+  });
+
+  return embed;
+}
+
+export function buildPaginationRow(
+  jobId: string,
+  page: number,
+  totalPages: number,
+  authorId: string
+): ActionRowBuilder<ButtonBuilder> {
+  const prevButton = new ButtonBuilder()
+    .setCustomId(`page:${jobId}:${page - 1}:${authorId}`)
+    .setLabel('◀ Previous')
+    .setStyle(ButtonStyle.Secondary)
+    .setDisabled(page <= 1);
+
+  const indicatorButton = new ButtonBuilder()
+    .setCustomId('page_noop')
+    .setLabel(`Page ${page} of ${totalPages}`)
+    .setStyle(ButtonStyle.Secondary)
+    .setDisabled(true);
+
+  const nextButton = new ButtonBuilder()
+    .setCustomId(`page:${jobId}:${page + 1}:${authorId}`)
+    .setLabel('Next ▶')
+    .setStyle(ButtonStyle.Primary)
+    .setDisabled(page >= totalPages);
+
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(
+    prevButton,
+    indicatorButton,
+    nextButton
+  );
+}
+
+export async function handleButtonInteraction(
+  interaction: ButtonInteraction
+): Promise<void> {
+  const customId = interaction.customId;
+  if (!customId.startsWith('page:') || customId === 'page_noop') {
+    return;
+  }
+
+  const parts = customId.split(':');
+  if (parts.length < 4) {
+    return;
+  }
+
+  const [, jobId, targetPageStr, authorId] = parts;
+  if (!jobId || !targetPageStr) {
+    return;
+  }
+
+  const targetPage = parseInt(targetPageStr, 10);
+  if (isNaN(targetPage) || targetPage < 1) {
+    return;
+  }
+
+  // Anti-spam / Author-only check (instant in-memory verification before deferring)
+  if (authorId && interaction.user.id !== authorId) {
+    await interaction.reply({
+      content: '⚠️ Only the user who ran this search can paginate results.',
+      ephemeral: true,
+    });
+    return;
+  }
+
+  // Acknowledge the interaction immediately to prevent Discord's 3-second timeout!
+  // deferUpdate() tells Discord the message update is in progress.
+  await interaction.deferUpdate();
+
+  try {
+    const repo = getRepository();
+    const [results, job] = await Promise.all([
+      repo.getJobResults(jobId),
+      repo.getJob(jobId),
+    ]);
+
+    if (!job && (!results || results.length === 0)) {
+      await interaction.followUp({
+        content: `❌ Search job \`${jobId}\` was not found.`,
+        ephemeral: true,
+      });
+      return;
+    }
+
+    if (!results || results.length === 0) {
+      await interaction.followUp({
+        content: `❌ No results stored for job \`${jobId}\`.`,
+        ephemeral: true,
+      });
+      return;
+    }
+
+    const totalPages = Math.ceil(results.length / 5) || 1;
+    const page = Math.max(1, Math.min(targetPage, totalPages));
+
+    const embed = buildResultsPageEmbed(jobId, results, page, totalPages, job);
+    const row = buildPaginationRow(jobId, page, totalPages, authorId);
+
+    // After deferUpdate(), update the message via editReply()
+    await interaction.editReply({
+      embeds: [embed],
+      components: [row],
+    });
+  } catch (error: unknown) {
+    console.error(`[Bot] Failed to paginate results for job ${jobId}:`, error);
+    try {
+      await interaction.followUp({
+        content: '⚠️ Failed to load page results from database.',
+        ephemeral: true,
+      });
+    } catch {
+      // ignore
+    }
+  }
+}
 
 export const slashCommands = [
   new SlashCommandBuilder()
@@ -359,45 +538,30 @@ export async function handleInteraction(
       return;
     }
 
-    const embed = new EmbedBuilder()
-      .setColor(0x5865f2)
-      .setTitle(
-        `🎯 Hunt Results: ${topic.toUpperCase()} (${language.toUpperCase()})`
-      )
-      .setDescription(
-        `Job ID: \`${job.id}\`\n` +
-        `Found **${finishedJob.results.length}** ranked communities ` +
-        `(from ${finishedJob.progress.queriesExecuted} queries).`
-      )
-      .setFooter({
-        text:
-          `Mode: ${finishedJob.mode} | ` +
-          'View full details in dashboard',
-      });
+    if (finishedJob.results.length === 0) {
+      let content = `🎯 **Hunt Completed for ${topic.toUpperCase()} (${language.toUpperCase()})**\nJob ID: \`${job.id}\`\nNo communities matched all strict topic and language criteria.`;
+      if (finishedJob.languageFilterNotice) {
+        content += `\n⚠️ *${finishedJob.languageFilterNotice}*`;
+      }
+      await interaction.followUp({ content });
+      return;
+    }
 
-    finishedJob.results.slice(0, 5).forEach((res, i) => {
-      const serverName =
-        res.invite.community?.name || res.invite.code;
+    const totalResults = finishedJob.results.length;
+    const totalPages = Math.ceil(totalResults / 5) || 1;
+    const embed = buildResultsPageEmbed(
+      job.id,
+      finishedJob.results,
+      1,
+      totalPages,
+      finishedJob
+    );
+    const components =
+      totalPages > 1
+        ? [buildPaginationRow(job.id, 1, totalPages, interaction.user.id)]
+        : [];
 
-      const members = res.invite.community?.approximateMemberCount
-        ? ` (${res.invite.community.approximateMemberCount.toLocaleString()} members)`
-        : '';
-
-      const link = `[${serverName}](${res.invite.canonicalUrl})`;
-
-      embed.addFields({
-        name: `#${i + 1} • Score ${res.score}/100: ${serverName}`,
-        value:
-          `${link}${members}\n` +
-          `Status: \`${res.invite.status}\` | ` +
-          `Lang: \`${res.detectedLanguage}\`\n` +
-          `*${res.scoreBreakdown.explanations
-            .slice(0, 2)
-            .join(' • ')}*`,
-      });
-    });
-
-    await interaction.followUp({ embeds: [embed] });
+    await interaction.followUp({ embeds: [embed], components });
     return;
   }
 
@@ -480,36 +644,31 @@ export async function handleInteraction(
     await interaction.deferReply();
 
     const jobId = interaction.options.getString('job', true);
-    const results = await repo.getJobResults(jobId);
+    const [results, job] = await Promise.all([
+      repo.getJobResults(jobId),
+      repo.getJob(jobId),
+    ]);
 
     if (results.length === 0) {
+      let content = `No results stored for job \`${jobId}\` yet.`;
+      if (job?.languageFilterNotice) {
+        content = `⚠️ ${job.languageFilterNotice}`;
+      }
       await interaction.editReply({
-        content: `No results stored for job \`${jobId}\` yet.`,
+        content,
       });
       return;
     }
 
-    const embed = new EmbedBuilder()
-      .setTitle(`Stored Results for ${jobId}`)
-      .setColor(0x5865f2)
-      .setDescription(
-        `Displaying top ${Math.min(results.length, 5)} ` +
-        `of ${results.length} total results:`
-      );
+    const totalResults = results.length;
+    const totalPages = Math.ceil(totalResults / 5) || 1;
+    const embed = buildResultsPageEmbed(jobId, results, 1, totalPages, job);
+    const components =
+      totalPages > 1
+        ? [buildPaginationRow(jobId, 1, totalPages, interaction.user.id)]
+        : [];
 
-    results.slice(0, 5).forEach((r, idx) => {
-      embed.addFields({
-        name:
-          `#${idx + 1} - Score ${r.score}/100: ` +
-          `${r.invite.community?.name || r.invite.code}`,
-        value:
-          `Link: ${r.invite.canonicalUrl}\n` +
-          `Status: \`${r.invite.status}\` | ` +
-          `Members: ${r.invite.community?.approximateMemberCount || 'Hidden'}`,
-      });
-    });
-
-    await interaction.editReply({ embeds: [embed] });
+    await interaction.editReply({ embeds: [embed], components });
     return;
   }
 

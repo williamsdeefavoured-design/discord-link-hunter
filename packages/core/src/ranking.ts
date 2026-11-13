@@ -1,4 +1,5 @@
 import {
+  DetectedLanguage,
   DiscoveredInvite,
   LanguageCode,
   RankedInviteResult,
@@ -6,7 +7,12 @@ import {
   TradingTopic,
   VerifiedInvite,
 } from './types.js';
-import { detectLanguageEvidence, detectTopicsFromText } from './languages.js';
+import {
+  detectLanguageEvidence,
+  detectTopicsFromText,
+  hasGeneralTradingContext,
+  hasNonTradingContext,
+} from './languages.js';
 
 export function calculateInviteScore(
   invite: VerifiedInvite,
@@ -17,7 +23,7 @@ export function calculateInviteScore(
   score: number;
   scoreBreakdown: ScoreBreakdown;
   detectedTopics: TradingTopic[];
-  detectedLanguage: LanguageCode;
+  detectedLanguage: DetectedLanguage;
 } {
   const explanations: string[] = [];
 
@@ -32,11 +38,31 @@ export function calculateInviteScore(
 
   const serverTopics = detectTopicsFromText(serverText);
   const sourceTopics = detectTopicsFromText(sourceText);
-  const detectedTopics = Array.from(new Set<TradingTopic>([...serverTopics, ...sourceTopics]));
   const serverTopicMatches = requestedTopics.filter((topic) => serverTopics.includes(topic));
   const sourceTopicMatches = requestedTopics.filter((topic) => sourceTopics.includes(topic));
   const directTopicMatch = serverTopicMatches.length > 0;
-  const sourceOnlyTopicMatch = !directTopicMatch && sourceTopicMatches.length > 0;
+
+  // Detect misleading source snippets:
+  // External search snippets are supporting evidence, not definitive proof of server content.
+  // 1. If server metadata indicates non-trading content (e.g. anime, gaming, memes)
+  // 2. OR if server metadata explicitly describes other specific trading topic(s) without the requested topic
+  // 3. OR if server metadata has a description but zero trading context
+  // then any external snippet mentioning the query topic is treated as uncorroborated / misleading.
+  const hasServerContradiction = hasNonTradingContext(serverText);
+  const hasServerTradingContext = hasGeneralTradingContext(serverText) || serverTopics.length > 0;
+  const serverHasOtherSpecificTopics = serverTopics.length > 0 && !directTopicMatch;
+
+  const isMisleadingSnippet =
+    !directTopicMatch &&
+    sourceTopicMatches.length > 0 &&
+    (hasServerContradiction || serverHasOtherSpecificTopics || (!hasServerTradingContext && Boolean(invite.community?.description)));
+
+  const sourceOnlyTopicMatch = !directTopicMatch && sourceTopicMatches.length > 0 && !isMisleadingSnippet;
+
+  const detectedTopics = Array.from(new Set<TradingTopic>([
+    ...serverTopics,
+    ...(sourceOnlyTopicMatch ? sourceTopicMatches : []),
+  ]));
 
   // 1. Topic relevance (0-35). A source snippet alone cannot prove a match.
   let topicRelevance = 0;
@@ -48,7 +74,9 @@ export function calculateInviteScore(
     explanations.push(`Server metadata matches requested topic(s): ${serverTopicMatches.join(', ')} (+${topicRelevance} pts)`);
   } else if (sourceOnlyTopicMatch) {
     topicRelevance = 10;
-    explanations.push('Requested topic appears only in external source snippets; not confirmed by server metadata (+10 pts)');
+    explanations.push(`Requested topic appears in external source snippets; supported by server trading context (+10 pts)`);
+  } else if (isMisleadingSnippet) {
+    explanations.push('Requested topic appears only in search snippets; server metadata indicates non-trading or unrelated content (+0 pts)');
   } else {
     explanations.push('Requested topic not found in available evidence (+0 pts)');
   }
@@ -91,9 +119,8 @@ export function calculateInviteScore(
     explanations.push(`Available text suggests [${languageEvidence.language}], not requested language(s) [${requestedLanguages.join(', ')}] (+0 pts)`);
   }
 
-  // Keep the original LanguageCode return type. Unknown cannot be represented
-  // until types.ts and its consumers are updated; do not award points for it.
-  const detectedLanguage: LanguageCode = languageEvidence.language ?? 'en';
+  // Retain explicit 'unknown' state when evidence is insufficient
+  const detectedLanguage: DetectedLanguage = languageEvidence.language ?? 'unknown';
 
   // 4. Provenance (up to 10). Multiple domains are discovery evidence, not proof
   // that the domains are independent or that their claims are correct.
@@ -126,13 +153,13 @@ export function calculateInviteScore(
   const members = invite.community?.approximateMemberCount;
   const online = invite.community?.approximatePresenceCount;
   if (typeof members === 'number' && Number.isFinite(members) && members >= 0) {
-    if (members >= 5000) activitySignal = 8;
-    else if (members >= 1000) activitySignal = 6;
-    else if (members >= 100) activitySignal = 4;
-    else activitySignal = 2;
+    if (members >= 5000) activitySignal = 10;
+    else if (members >= 1000) activitySignal = 8;
+    else if (members >= 100) activitySignal = 6;
+    else activitySignal = 4;
     explanations.push(`Community size reported by Discord: ${members.toLocaleString()} (+${activitySignal} pts)`);
   } else {
-    explanations.push('Discord did not provide a member count (+0 pts)');
+    explanations.push('Member counts private or not provided by Discord (+0 pts)');
   }
   if (typeof online === 'number' && Number.isFinite(online) && online > 0) {
     activitySignal = Math.min(10, activitySignal + 2);
@@ -198,10 +225,24 @@ export function compareRankedResults(a: RankedInviteResult, b: RankedInviteResul
   return a.invite.code.localeCompare(b.invite.code);
 }
 
+/**
+ * Validates whether a result has credible topic evidence.
+ * Must have topicRelevance > 0 and contain at least one requested topic.
+ */
+export function hasCredibleTopicEvidence(
+  res: RankedInviteResult,
+  requestedTopics: TradingTopic[]
+): boolean {
+  if (requestedTopics.length === 0) return true;
+  if (res.scoreBreakdown.topicRelevance <= 0) return false;
+  return requestedTopics.some((topic) => res.detectedTopics.includes(topic));
+}
+
 export function rankInviteResults(
   verifiedInvites: { invite: VerifiedInvite; sources: DiscoveredInvite[] }[],
   requestedTopics: TradingTopic[],
-  requestedLanguages: LanguageCode[]
+  requestedLanguages: LanguageCode[],
+  options?: { strictFilter?: boolean }
 ): RankedInviteResult[] {
   const ranked = verifiedInvites.map(({ invite, sources }) => {
     const { score, scoreBreakdown, detectedTopics, detectedLanguage } = calculateInviteScore(
@@ -223,5 +264,34 @@ export function rankInviteResults(
   });
 
   ranked.sort(compareRankedResults);
-  return ranked;
+
+  if (options?.strictFilter === false) {
+    return ranked;
+  }
+
+  // Strict relevance filtering:
+  // A candidate must satisfy BOTH:
+  // 1. Credible requested-language evidence (if requestedLanguages specified)
+  // 2. Credible requested-topic evidence (if requestedTopics specified)
+  // Never fill missing slots with English, unknown language, or unrelated topic communities.
+  return ranked.filter((res) => {
+    // 1. Language relevance check
+    if (requestedLanguages.length > 0) {
+      if (
+        res.detectedLanguage === 'unknown' ||
+        !requestedLanguages.includes(res.detectedLanguage as LanguageCode)
+      ) {
+        return false;
+      }
+    }
+
+    // 2. Topic relevance check
+    if (requestedTopics.length > 0) {
+      if (!hasCredibleTopicEvidence(res, requestedTopics)) {
+        return false;
+      }
+    }
+
+    return true;
+  });
 }

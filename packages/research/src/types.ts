@@ -15,6 +15,8 @@ export interface ProviderSearchResult {
   statusCode: number;
   durationMs: number;
   error?: string;
+  retryAfterSeconds?: number;
+  isPermanentError?: boolean;
 }
 
 export interface SearchProviderOptions {
@@ -36,5 +38,6 @@ export interface QueryPlanItem {
   topic: TradingTopic;
   language: LanguageCode;
   priority: number;
+  platform?: string;
 }
 

@@ -71,6 +71,7 @@ CREATE TABLE IF NOT EXISTS search_jobs (
   estimated_requests INTEGER DEFAULT 0,
   estimated_credits INTEGER DEFAULT 0,
   dry_run_explanation TEXT,
+  language_filter_notice TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   started_at TIMESTAMPTZ,
   completed_at TIMESTAMPTZ
@@ -118,6 +119,7 @@ ALTER TABLE search_jobs ADD COLUMN IF NOT EXISTS planned_queries JSONB;
 ALTER TABLE search_jobs ADD COLUMN IF NOT EXISTS estimated_requests INTEGER DEFAULT 0;
 ALTER TABLE search_jobs ADD COLUMN IF NOT EXISTS estimated_credits INTEGER DEFAULT 0;
 ALTER TABLE search_jobs ADD COLUMN IF NOT EXISTS dry_run_explanation TEXT;
+ALTER TABLE search_jobs ADD COLUMN IF NOT EXISTS language_filter_notice TEXT;
 ALTER TABLE search_job_results ADD COLUMN IF NOT EXISTS is_simulated BOOLEAN DEFAULT FALSE;
 
 -- Performance Indexes

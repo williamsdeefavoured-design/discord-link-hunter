@@ -78,6 +78,11 @@ describe('Ranking and Scoring Engine', () => {
           code: 'low-score',
           canonicalUrl: 'https://discord.gg/low-score',
           status: 'expired_or_revoked' as const,
+          community: {
+            id: '2',
+            name: 'Forex Alerts Revoked',
+            description: 'English forex alerts and currency trading community.',
+          },
           lastVerifiedAt: new Date().toISOString(),
         },
         sources: [],
@@ -89,7 +94,8 @@ describe('Ranking and Scoring Engine', () => {
           status: 'valid' as const,
           community: {
             id: '1',
-            name: 'Forex Pros',
+            name: 'Forex Pros Official',
+            description: 'Welcome to the official English forex trading community for traders.',
             approximateMemberCount: 5000,
           },
           lastVerifiedAt: new Date().toISOString(),

@@ -89,9 +89,9 @@ describe('Research Adapters & Fallback Orchestration', () => {
         query: 'test',
         items: [
           {
-            title: 'Fallback Hit',
-            url: 'https://discord.gg/fallback-hit',
-            snippet: 'Join https://discord.gg/fallback-hit',
+            title: 'Fallback Forex Traders Club',
+            url: 'https://tradingdirectory.com/fallback-hit',
+            snippet: 'Join our official English forex trading community: https://discord.gg/fallback-hit',
           },
         ],
         statusCode: 200,
@@ -106,6 +106,12 @@ describe('Research Adapters & Fallback Orchestration', () => {
         code,
         canonicalUrl: `https://discord.gg/${code}`,
         status: 'valid',
+        community: {
+          id: 'fb-1',
+          name: 'Fallback Forex Traders Club',
+          description: 'Official English forex trading community for currency traders.',
+          approximateMemberCount: 5000,
+        },
         lastVerifiedAt: new Date().toISOString(),
       }),
     });

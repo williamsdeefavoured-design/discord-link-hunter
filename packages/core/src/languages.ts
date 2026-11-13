@@ -1,4 +1,4 @@
-import { LanguageCode, TradingTopic } from './types.js';
+import { DetectedLanguage, LanguageCode, TradingTopic } from './types.js';
 
 export interface TopicDictionary {
   topic: TradingTopic;
@@ -10,7 +10,7 @@ export interface TopicDictionary {
 export const LANGUAGE_TRADING_DICTIONARIES: Record<LanguageCode, Record<TradingTopic, string[]>> = {
   en: {
     forex: ['forex', 'fx trading', 'currency trading', 'forex signals'],
-    xauusd: ['xauusd', 'gold trading', 'gold signals', 'xau usd analysis'],
+    xauusd: ['xauusd', 'gold trading', 'gold signals', 'xau usd analysis', 'gold', 'xau', 'gold scalping', 'gold traders'],
     stocks: ['stocks', 'stock', 'stock trading', 'stock market', 'equities', 'shares', 'equity trading'],
     crypto: ['crypto', 'cryptocurrency', 'bitcoin', 'altcoins', 'defi'],
     futures: ['futures trading', 'es futures', 'nq futures', 'micro futures'],
@@ -23,11 +23,11 @@ export const LANGUAGE_TRADING_DICTIONARIES: Record<LanguageCode, Record<TradingT
     education: ['trading education', 'trading course', 'learn trading', 'mentorship'],
   },
   de: {
-    forex: ['forex', 'devisenhandel', 'devisen', 'forex signale'],
-    xauusd: ['xauusd', 'gold handeln', 'gold trading', 'goldpreis analyse'],
-    stocks: ['aktien', 'aktienmarkt', 'wertpapiere', 'börse'],
-    crypto: ['krypto', 'kryptowährung', 'bitcoin', 'altcoins'],
-    futures: ['futures', 'termingeschäfte', 'dax futures'],
+    forex: ['devisenhandel', 'devisen', 'forex signale', 'forex'],
+    xauusd: ['gold handeln', 'goldpreis analyse', 'gold trading', 'xauusd', 'gold', 'xau', 'goldpreis', 'gold signale'],
+    stocks: ['aktien', 'aktienmarkt', 'wertpapiere', 'börse', 'boerse', 'aktienhandel'],
+    crypto: ['kryptowährung', 'krypto', 'bitcoin', 'altcoins'],
+    futures: ['termingeschäfte', 'futures', 'dax futures'],
     options: ['optionen', 'optionshandel', 'optionsscheine'],
     indices: ['indizes', 'dax', 'eurostoxx', 'indexhandel'],
     day_trading: ['daytrading', 'intraday trading', 'scalpen'],
@@ -37,52 +37,52 @@ export const LANGUAGE_TRADING_DICTIONARIES: Record<LanguageCode, Record<TradingT
     education: ['trading lernen', 'trading ausbildung', 'börsenwissen'],
   },
   es: {
-    forex: ['forex', 'mercado de divisas', 'señales forex', 'divisas'],
-    xauusd: ['xauusd', 'trading de oro', 'señales oro', 'análisis xauusd'],
-    stocks: ['acciones', 'bolsa de valores', 'renta variable', 'mercado bursátil'],
+    forex: ['mercado de divisas', 'señales forex', 'divisas', 'forex'],
+    xauusd: ['trading de oro', 'señales oro', 'análisis xauusd', 'xauusd', 'oro', 'xau', 'trading oro', 'scalping oro', 'señales de oro', 'senales oro', 'analisis xauusd'],
+    stocks: ['acciones', 'bolsa de valores', 'renta variable', 'mercado bursátil', 'bolsa', 'mercado bursatil', 'inversión en bolsa', 'inversion en bolsa'],
     crypto: ['criptomonedas', 'cripto', 'bitcoin', 'altcoins'],
-    futures: ['futuros', 'trading de futuros', 'micro futuros'],
+    futures: ['trading de futuros', 'futuros', 'micro futuros'],
     options: ['opciones financieras', 'trading de opciones', 'call y put'],
     indices: ['índices', 'sp500', 'ibex35', 'nasdaq'],
-    day_trading: ['day trading', 'trading intradiario', 'scalping'],
-    swing_trading: ['swing trading', 'operaciones swing'],
+    day_trading: ['trading intradiario', 'day trading', 'scalping'],
+    swing_trading: ['operaciones swing', 'swing trading'],
     investing: ['inversión', 'invertir en bolsa', 'crecimiento patrimonial'],
     technical_analysis: ['análisis técnico', 'acción del precio', 'patrones gráficos'],
     education: ['educación trading', 'aprender trading', 'curso de trading'],
   },
   pt: {
-    forex: ['forex', 'mercado cambial', 'sinais forex', 'câmbio'],
-    xauusd: ['xauusd', 'trading de ouro', 'ouro análise', 'sinais xauusd'],
-    stocks: ['ações', 'bolsa de valores', 'mercado de capitais', 'b3'],
+    forex: ['mercado cambial', 'sinais forex', 'câmbio', 'forex'],
+    xauusd: ['trading de ouro', 'ouro análise', 'sinais xauusd', 'xauusd', 'ouro', 'xau', 'sinais ouro', 'ouro analise', 'trading ouro'],
+    stocks: ['ações', 'bolsa de valores', 'mercado de capitais', 'b3', 'acoes', 'bolsa', 'dividendos', 'mercado de acoes', 'mercado de ações'],
     crypto: ['criptomoedas', 'cripto', 'bitcoin', 'altcoins'],
     futures: ['mercado futuro', 'contratos futuros', 'mini índice', 'mini dólar'],
-    options: ['opções', 'mercado de opções', 'travas de opções'],
+    options: ['mercado de opções', 'opções', 'travas de opções'],
     indices: ['índices', 'ibovespa', 'sp500', 'índice futuro'],
-    day_trading: ['day trade', 'day trader', 'scalping brasil'],
+    day_trading: ['day trade brasil', 'day trade', 'scalping brasil'],
     swing_trading: ['swing trade', 'operações swing'],
     investing: ['investimentos', 'investir em ações', 'renda variável'],
     technical_analysis: ['análise técnica', 'price action', 'gráficos de candlestick'],
     education: ['curso de trading', 'aprender a operar', 'mentoria trading'],
   },
   fr: {
-    forex: ['forex', 'marché des changes', 'signaux forex', 'devises'],
-    xauusd: ['xauusd', 'trading or', 'cours de l or', 'analyse or'],
-    stocks: ['actions', 'bourse', 'marché boursier', 'actions paris'],
-    crypto: ['crypto', 'cryptomonnaies', 'bitcoin', 'altcoins'],
+    forex: ['marché des changes', 'signaux forex', 'devises', 'forex'],
+    xauusd: ['trading or', 'cours de l or', 'analyse or', 'xauusd', 'or', 'xau', 'signaux or'],
+    stocks: ['actions', 'bourse', 'marché boursier', 'marche boursier', 'actions paris'],
+    crypto: ['cryptomonnaies', 'crypto', 'bitcoin', 'altcoins'],
     futures: ['contrats à terme', 'trading futures'],
-    options: ['options vanilles', 'trading d options', 'warrants'],
+    options: ['trading d options', 'options vanilles', 'warrants'],
     indices: ['indices', 'cac 40', 'sp500', 'dax 40'],
-    day_trading: ['day trading', 'intraday', 'scalping france'],
+    day_trading: ['trading intraday', 'day trading', 'scalping france'],
     swing_trading: ['swing trading', 'position trading'],
     investing: ['investissement', 'investir en bourse', 'gestion de portefeuille'],
     technical_analysis: ['analyse technique', 'figures chartistes', 'price action'],
     education: ['formation trading', 'apprendre le trading', 'cours bourse'],
   },
   ar: {
-    forex: ['فوركس', 'تداول العملات', 'توصيات فوركس', 'سوق العملات'],
-    xauusd: ['ذهب', 'تداول الذهب', 'تحليل الذهب', 'xauusd'],
-    stocks: ['أسهم', 'سوق الأسهم', 'تداول الأسهم', 'البورصة'],
-    crypto: ['عملات رقمية', 'كريبتو', 'بيتكوين', 'تداول الكريبتو'],
+    forex: ['تداول العملات', 'سوق العملات', 'توصيات فوركس', 'فوركس'],
+    xauusd: ['تداول الذهب', 'تحليل الذهب', 'ذهب', 'الذهب', 'xauusd'],
+    stocks: ['تداول الأسهم', 'سوق الأسهم', 'البورصة', 'أسهم'],
+    crypto: ['عملات رقمية', 'تداول الكريبتو', 'بيتكوين', 'كريبتو'],
     futures: ['عقود آجلة', 'تداول الفيوتشر'],
     options: ['خيارات', 'عقود الخيارات', 'أوبشن'],
     indices: ['مؤشرات', 'داو جونز', 'ناسداك', 'اس اند بي'],
@@ -121,13 +121,106 @@ export function getSynonymsForTopic(topic: TradingTopic, language: LanguageCode)
  * Do not interpret them as evidence of a language merely because they occur in
  * a language's trading dictionary.
  */
+export const NON_TRADING_TERMS = [
+  'minecraft',
+  'roblox',
+  'anime',
+  'manga',
+  'gaming',
+  'gamer',
+  'gamers',
+  'fortnite',
+  'juegos',
+  'videojuegos',
+  'jogos',
+  'meme',
+  'memes',
+  'dating',
+  'nsfw',
+  'roleplay',
+  'valorant',
+  'league of legends',
+  'pubg',
+  'gta',
+  'fivem',
+];
+
+export const GENERAL_TRADING_TERMS = [
+  'trading',
+  'trader',
+  'traders',
+  'trade',
+  'invest',
+  'investing',
+  'investment',
+  'investments',
+  'investor',
+  'investors',
+  'inversión',
+  'inversion',
+  'inversiones',
+  'inversor',
+  'inversores',
+  'invertir',
+  'investimento',
+  'investimentos',
+  'investidor',
+  'investidores',
+  'investieren',
+  'anleger',
+  'geldanlage',
+  'finanzen',
+  'finance',
+  'financial',
+  'finanzas',
+  'finanças',
+  'signals',
+  'signale',
+  'sinais',
+  'señales',
+  'senales',
+  'signaux',
+  'scalp',
+  'scalper',
+  'scalpers',
+  'scalping',
+  'chart',
+  'charts',
+  'market',
+  'markets',
+  'mercado',
+  'mercados',
+  'marché',
+  'marche',
+  'börse',
+  'boerse',
+  'bolsa',
+  'forex',
+  'crypto',
+  'stocks',
+  'xauusd',
+  'gold',
+  'oro',
+  'ouro',
+];
+
+export function hasNonTradingContext(text: string): boolean {
+  const normalized = normalizeText(text);
+  return NON_TRADING_TERMS.some((term) => hasPhrase(normalized, term));
+}
+
+export function hasGeneralTradingContext(text: string): boolean {
+  const normalized = normalizeText(text);
+  return GENERAL_TRADING_TERMS.some((term) => hasPhrase(normalized, term));
+}
+
 const LANGUAGE_HINTS: Record<LanguageCode, string[]> = {
-  en: ['welcome', 'join us', 'we are', 'learn trading'],
-  de: ['deutsch', 'deutsche', 'deutscher', 'der', 'die', 'und', 'für', 'aktien', 'börse', 'wertpapiere', 'devisenhandel', 'investieren'],
-  es: ['español', 'española', 'bienvenidos', 'acciones', 'señales', 'futuros', 'inversión', 'análisis', 'divisas'],
-  pt: ['português', 'portugues', 'brasileiro', 'brasil', 'ações', 'opções', 'investimentos', 'sinais', 'câmbio', 'ibovespa'],
-  fr: ['français', 'française', 'bienvenue', 'bourse', 'signaux', 'investissement', 'cryptomonnaies', 'marché', 'devises'],
-  ar: ['العربية', 'عربي', 'تداول', 'الأسهم', 'عملات', 'الذهب', 'استثمار'],
+  en: ['welcome', 'join us', 'we are', 'learn trading', 'community', 'official', 'chat', 'discussion', 'daily analysis', 'financial', 'traders club', 'the', 'and', 'for', 'with', 'join', 'server', 'traders', 'group', 'free', 'alerts', 'signals', 'daily', 'news', 'pros', 'club'],
+  de: ['deutsch', 'deutsche', 'deutscher', 'deutschland', 'der', 'die', 'das', 'und', 'für', 'aktien', 'börse', 'wertpapiere', 'devisenhandel', 'investieren', 'gemeinschaft', 'anleger', 'finanzen', 'handel'],
+  es: ['español', 'española', 'bienvenidos', 'comunidad', 'servidor', 'para', 'acciones', 'señales', 'futuros', 'inversión', 'análisis', 'divisas', 'bolsa de valores', 'renta variable', 'inversores', 'mercado bursátil', 'españa', 'latam'],
+  pt: ['português', 'portugues', 'brasileiro', 'brasil', 'bem-vindos', 'comunidade', 'ações', 'opções', 'investimentos', 'sinais', 'câmbio', 'ibovespa', 'mercado financeiro', 'investidores', 'renda variável'],
+  fr: ['français', 'française', 'bienvenue', 'communauté', 'serveur', 'bourse', 'signaux', 'investissement', 'cryptomonnaies', 'marché', 'devises', 'investisseurs', 'france', 'cac 40'],
+  ar: ['العربية', 'عربي', 'تداول', 'الأسهم', 'عملات', 'الذهب', 'استثمار', 'مجتمع', 'سيرفر', 'توصيات', 'مستثمرين', 'البورصة'],
 };
 
 // Precompute terms that belong to only one language across all dictionaries.
@@ -173,8 +266,12 @@ export function detectLanguageEvidence(text: string): LanguageEvidence {
   const normalized = normalizeText(text);
   const scores = {} as Record<LanguageCode, number>;
   const explicitLabels: Record<LanguageCode, string[]> = {
-    en: ['english'], de: ['deutsch', 'german'], es: ['español', 'spanish'],
-    pt: ['português', 'portuguese'], fr: ['français', 'french'], ar: ['arabic'],
+    en: ['english', 'en', 'usa', 'uk'],
+    de: ['deutsch', 'german', 'de', 'germany', 'österreich', 'schweiz'],
+    es: ['español', 'spanish', 'es', 'spain', 'españa', 'latinoamérica', 'latam'],
+    pt: ['português', 'portuguese', 'pt', 'brasil', 'brazil', 'portugal'],
+    fr: ['français', 'french', 'fr', 'france'],
+    ar: ['arabic', 'ar', 'عربي', 'عرب'],
   };
   for (const language of Object.keys(LANGUAGE_TRADING_DICTIONARIES) as LanguageCode[]) {
     const distinctHints = new Set(LANGUAGE_HINTS[language].map((term) => normalizeText(term).trim()));
@@ -209,6 +306,13 @@ export function detectLanguageEvidence(text: string): LanguageEvidence {
     language,
     confidence: best >= 6 && best - runnerUp >= 3 ? 'high' : 'medium',
   };
+}
+
+/**
+ * Returns the detected language code or 'unknown' if evidence is insufficient.
+ */
+export function detectDetectedLanguage(text: string): DetectedLanguage {
+  return detectLanguageEvidence(text).language ?? 'unknown';
 }
 
 /**

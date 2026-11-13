@@ -52,6 +52,27 @@ export class TavilyAdapter implements SearchProvider {
       const statusCode = res.status;
       const durationMs = Date.now() - start;
 
+      let retryAfterSeconds: number | undefined;
+      const retryHeader = res.headers?.get ? res.headers.get('retry-after') : undefined;
+      if (retryHeader) {
+        const parsed = parseInt(retryHeader, 10);
+        if (!isNaN(parsed)) {
+          retryAfterSeconds = parsed;
+        }
+      }
+
+      if (statusCode === 401 || statusCode === 403) {
+        return {
+          provider: 'tavily',
+          query,
+          items: [],
+          statusCode,
+          durationMs,
+          error: `Tavily authentication failure (${statusCode}): invalid or forbidden credentials`,
+          isPermanentError: true,
+        };
+      }
+
       if (statusCode === 429) {
         return {
           provider: 'tavily',
@@ -59,7 +80,8 @@ export class TavilyAdapter implements SearchProvider {
           items: [],
           statusCode: 429,
           durationMs,
-          error: 'Tavily rate limit exceeded (429)',
+          error: `Tavily rate limit exceeded (429)${retryAfterSeconds ? ` - retry after ${retryAfterSeconds}s` : ''}`,
+          retryAfterSeconds,
         };
       }
 
