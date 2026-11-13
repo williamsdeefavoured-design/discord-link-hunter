@@ -4,7 +4,7 @@ import { resolveConnectionString } from './client.js';
 
 export async function runMigrations() {
   const config = getConfig();
-  const rawString = config.DIRECT_URL || config.DATABASE_URL;
+  const rawString = config.DATABASE_URL || config.DIRECT_URL;
 
   if (!rawString) {
     console.log('[Migrate] No DATABASE_URL or DIRECT_URL set. Skipping migrations.');

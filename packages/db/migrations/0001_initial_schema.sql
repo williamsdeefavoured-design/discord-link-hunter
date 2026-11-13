@@ -130,3 +130,51 @@ CREATE INDEX IF NOT EXISTS idx_search_job_results_score ON search_job_results(sc
 CREATE INDEX IF NOT EXISTS idx_verification_history_invite_code ON verification_history(invite_code);
 CREATE INDEX IF NOT EXISTS idx_provider_usage_provider ON provider_usage(provider);
 
+
+
+
+
+-- =====================================================
+-- DISCORD LINK HUNTER — DATABASE SECURITY
+-- Row Level Security and API access restrictions
+-- =====================================================
+
+-- Enable Row Level Security for all 8 tables
+
+ALTER TABLE public.communities
+ENABLE ROW LEVEL SECURITY;
+
+ALTER TABLE public.invites
+ENABLE ROW LEVEL SECURITY;
+
+ALTER TABLE public.sources
+ENABLE ROW LEVEL SECURITY;
+
+ALTER TABLE public.invite_sources
+ENABLE ROW LEVEL SECURITY;
+
+ALTER TABLE public.search_jobs
+ENABLE ROW LEVEL SECURITY;
+
+ALTER TABLE public.search_job_results
+ENABLE ROW LEVEL SECURITY;
+
+ALTER TABLE public.verification_history
+ENABLE ROW LEVEL SECURITY;
+
+ALTER TABLE public.provider_usage
+ENABLE ROW LEVEL SECURITY;
+
+-- Prevent public and browser-facing roles
+-- from directly accessing internal research data.
+
+REVOKE ALL PRIVILEGES ON TABLE
+  public.communities,
+  public.invites,
+  public.sources,
+  public.invite_sources,
+  public.search_jobs,
+  public.search_job_results,
+  public.verification_history,
+  public.provider_usage
+FROM PUBLIC, anon, authenticated;

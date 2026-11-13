@@ -700,14 +700,42 @@ export function resetRepositoryInstance(instance?: LinkHunterRepository | null):
   _repoInstance = instance || null;
 }
 
+
 export function getRepository(): LinkHunterRepository {
-  if (!_repoInstance) {
-    const config = getConfig();
-    if (config.SEARCH_MODE === 'live' && isDatabaseConnectedSync()) {
-      _repoInstance = new PostgresRepository();
-    } else {
-      _repoInstance = new InMemoryRepository();
-    }
+  if (_repoInstance) {
+    return _repoInstance;
   }
+
+  const config = getConfig();
+
+  const databaseConfigured = Boolean(
+    config.DATABASE_URL || config.DIRECT_URL
+  );
+
+  if (databaseConfigured) {
+    if (!isDatabaseConnectedSync()) {
+      throw new Error(
+        'PostgreSQL is configured but has not been verified. ' +
+        'Run the database connection test before initializing the repository.'
+      );
+    }
+
+    _repoInstance = new PostgresRepository();
+
+    console.log('[DB] Using PostgreSQL repository.');
+
+    return _repoInstance;
+  }
+
+  if (config.NODE_ENV === 'production') {
+    throw new Error(
+      'Production cannot use the in-memory repository.'
+    );
+  }
+
+  _repoInstance = new InMemoryRepository();
+
+  console.warn('[DB] Using development in-memory repository.');
+
   return _repoInstance;
 }

@@ -5,11 +5,13 @@ export interface TopicDictionary {
   keywords: string[];
 }
 
+// Keep these public dictionaries and their existing topic names intact: the
+// query planner and other packages can already depend on them.
 export const LANGUAGE_TRADING_DICTIONARIES: Record<LanguageCode, Record<TradingTopic, string[]>> = {
   en: {
     forex: ['forex', 'fx trading', 'currency trading', 'forex signals'],
     xauusd: ['xauusd', 'gold trading', 'gold signals', 'xau usd analysis'],
-    stocks: ['stocks', 'stock market', 'equities', 'shares', 'equity trading'],
+    stocks: ['stocks', 'stock', 'stock trading', 'stock market', 'equities', 'shares', 'equity trading'],
     crypto: ['crypto', 'cryptocurrency', 'bitcoin', 'altcoins', 'defi'],
     futures: ['futures trading', 'es futures', 'nq futures', 'micro futures'],
     options: ['options trading', 'call options', 'put options', 'options flow'],
@@ -99,53 +101,142 @@ export const DISCORD_SEARCH_TERMS = [
   '"discord.com/invite/"',
 ];
 
+/** Whole words/phrases only, so 'b3' won't accidentally match 'ab34'. */
+function normalizeText(value: string): string {
+  return ` ${value.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()} `;
+}
+
+function hasPhrase(normalizedText: string, phrase: string): boolean {
+  const normalizedPhrase = normalizeText(phrase).trim();
+  return normalizedPhrase.length > 0 && normalizedText.includes(` ${normalizedPhrase} `);
+}
+
 export function getSynonymsForTopic(topic: TradingTopic, language: LanguageCode): string[] {
   const dict = LANGUAGE_TRADING_DICTIONARIES[language] || LANGUAGE_TRADING_DICTIONARIES.en;
   return dict[topic] || LANGUAGE_TRADING_DICTIONARIES.en[topic] || [topic];
 }
 
-export function detectLanguageFromText(text: string): LanguageCode {
-  const lower = text.toLowerCase();
+/**
+ * Some trading terms (forex, crypto, bitcoin, etc.) are used in many languages.
+ * Do not interpret them as evidence of a language merely because they occur in
+ * a language's trading dictionary.
+ */
+const LANGUAGE_HINTS: Record<LanguageCode, string[]> = {
+  en: ['welcome', 'join us', 'we are', 'learn trading'],
+  de: ['deutsch', 'deutsche', 'deutscher', 'der', 'die', 'und', 'für', 'aktien', 'börse', 'wertpapiere', 'devisenhandel', 'investieren'],
+  es: ['español', 'española', 'bienvenidos', 'acciones', 'señales', 'futuros', 'inversión', 'análisis', 'divisas'],
+  pt: ['português', 'portugues', 'brasileiro', 'brasil', 'ações', 'opções', 'investimentos', 'sinais', 'câmbio', 'ibovespa'],
+  fr: ['français', 'française', 'bienvenue', 'bourse', 'signaux', 'investissement', 'cryptomonnaies', 'marché', 'devises'],
+  ar: ['العربية', 'عربي', 'تداول', 'الأسهم', 'عملات', 'الذهب', 'استثمار'],
+};
 
-  // Arabic character check
-  if (/[\u0600-\u06FF]/.test(text)) return 'ar';
-
-  let maxMatches = 0;
-  let detectedLang: LanguageCode = 'en';
-
-  for (const [lang, dict] of Object.entries(LANGUAGE_TRADING_DICTIONARIES) as [LanguageCode, Record<TradingTopic, string[]>][]) {
-    let matchCount = 0;
-    for (const keywords of Object.values(dict)) {
-      for (const kw of keywords) {
-        if (lower.includes(kw.toLowerCase())) {
-          matchCount++;
-        }
+// Precompute terms that belong to only one language across all dictionaries.
+const LANGUAGE_SPECIFIC_TERMS = (() => {
+  const owners = new Map<string, Set<LanguageCode>>();
+  for (const [language, topics] of Object.entries(LANGUAGE_TRADING_DICTIONARIES) as [LanguageCode, Record<TradingTopic, string[]>][]) {
+    for (const words of Object.values(topics)) {
+      for (const word of words) {
+        const normalized = normalizeText(word).trim();
+        if (!normalized) continue;
+        const set = owners.get(normalized) || new Set<LanguageCode>();
+        set.add(language);
+        owners.set(normalized, set);
       }
     }
-    if (matchCount > maxMatches) {
-      maxMatches = matchCount;
-      detectedLang = lang;
-    }
   }
+  const terms = {} as Record<LanguageCode, string[]>;
+  for (const language of Object.keys(LANGUAGE_TRADING_DICTIONARIES) as LanguageCode[]) {
+    terms[language] = [...owners.entries()]
+      .filter(([, languages]) => languages.size === 1 && languages.has(language))
+      .map(([term]) => term);
+  }
+  return terms;
+})();
 
-  return detectedLang;
+export interface LanguageEvidence {
+  language: LanguageCode | null;
+  confidence: 'high' | 'medium' | 'low';
 }
 
+/**
+ * Heuristic language evidence, NOT verified server language. Null means there
+ * is not enough distinguishing text to responsibly claim any language.
+ */
+export function detectLanguageEvidence(text: string): LanguageEvidence {
+  if (!text.trim()) return { language: null, confidence: 'low' };
+
+  // Arabic script is a stronger language signal than multilingual market terms.
+  if (/[\u0600-\u06FF]/u.test(text)) {
+    return { language: 'ar', confidence: 'high' };
+  }
+
+  const normalized = normalizeText(text);
+  const scores = {} as Record<LanguageCode, number>;
+  const explicitLabels: Record<LanguageCode, string[]> = {
+    en: ['english'], de: ['deutsch', 'german'], es: ['español', 'spanish'],
+    pt: ['português', 'portuguese'], fr: ['français', 'french'], ar: ['arabic'],
+  };
+  for (const language of Object.keys(LANGUAGE_TRADING_DICTIONARIES) as LanguageCode[]) {
+    const distinctHints = new Set(LANGUAGE_HINTS[language].map((term) => normalizeText(term).trim()));
+    const distinctTerms = new Set(LANGUAGE_SPECIFIC_TERMS[language]);
+    let points = 0;
+
+    for (const hint of distinctHints) {
+      if (hasPhrase(normalized, hint)) points += 2;
+    }
+    for (const term of distinctTerms) {
+      if (hasPhrase(normalized, term)) points += 2;
+    }
+    if (explicitLabels[language].some((label) => hasPhrase(normalized, label))) points += 5;
+    scores[language] = points;
+  }
+
+  // Recognize common German compound nouns like "Aktienprofi". Avoid broad
+  // substring matching in all other cases.
+  if (/(?:^|[^\p{L}\p{N}])aktien[\p{L}]{2,}/iu.test(text)) {
+    scores.de += 3;
+  }
+
+  const ranked = (Object.entries(scores) as [LanguageCode, number][])
+    .sort((a, b) => b[1] - a[1]);
+  const [language, best] = ranked[0];
+  const runnerUp = ranked[1]?.[1] ?? 0;
+
+  if (best < 3 || best - runnerUp < 2) {
+    return { language: null, confidence: 'low' };
+  }
+  return {
+    language,
+    confidence: best >= 6 && best - runnerUp >= 3 ? 'high' : 'medium',
+  };
+}
+
+/**
+ * Compatibility helper for existing callers expecting LanguageCode.
+ * IMPORTANT: 'en' is a legacy fallback, NOT a claim that English was detected.
+ * Ranking uses detectLanguageEvidence() to avoid rewarding this fallback.
+ */
+export function detectLanguageFromText(text: string): LanguageCode {
+  return detectLanguageEvidence(text).language ?? 'en';
+}
+
+/** Detect markets from explicit keyword boundaries (not arbitrary substrings). */
 export function detectTopicsFromText(text: string): TradingTopic[] {
-  const lower = text.toLowerCase();
+  const normalized = normalizeText(text);
   const matchedTopics = new Set<TradingTopic>();
 
   for (const dict of Object.values(LANGUAGE_TRADING_DICTIONARIES)) {
     for (const [topic, keywords] of Object.entries(dict) as [TradingTopic, string[]][]) {
-      for (const kw of keywords) {
-        if (lower.includes(kw.toLowerCase())) {
-          matchedTopics.add(topic);
-          break;
-        }
+      if (keywords.some((word) => hasPhrase(normalized, word))) {
+        matchedTopics.add(topic);
       }
     }
   }
 
+  // German compounds such as 'Aktienprofi' still explicitly refer to stocks.
+  if (/(?:^|[^\p{L}\p{N}])aktien[\p{L}]{2,}/iu.test(text)) {
+    matchedTopics.add('stocks');
+  }
+
   return Array.from(matchedTopics);
 }
-
