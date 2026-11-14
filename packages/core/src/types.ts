@@ -149,6 +149,7 @@ export interface RankedInviteResult {
   detectedLanguage: DetectedLanguage;
   isVerifiedFact: boolean;
   isSimulated?: boolean;
+  alternateInviteCodes?: string[];
 }
 
 export interface SearchJobParams {

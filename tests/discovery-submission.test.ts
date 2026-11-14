@@ -19,6 +19,7 @@ describe('Discovery Submission & Dry Run Verification', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/jobs',
+      headers: { 'x-api-key': 'dlh_dev_secret_key' },
       payload: {
         topics: ['forex', 'xauusd'],
         languages: ['en'],
@@ -56,6 +57,7 @@ describe('Discovery Submission & Dry Run Verification', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/jobs',
+      headers: { 'x-api-key': 'dlh_dev_secret_key' },
       payload: {
         topics: ['forex'],
         languages: ['en'],
@@ -84,6 +86,7 @@ describe('Discovery Submission & Dry Run Verification', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/jobs',
+      headers: { 'x-api-key': 'dlh_dev_secret_key' },
       payload: {
         topics: ['invalid-topic-xyz'],
         limit: -5,

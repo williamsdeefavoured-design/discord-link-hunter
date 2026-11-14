@@ -45,17 +45,21 @@ export function calculateInviteScore(
   // Detect misleading source snippets:
   // External search snippets are supporting evidence, not definitive proof of server content.
   // 1. If server metadata indicates non-trading content (e.g. anime, gaming, memes)
-  // 2. OR if server metadata explicitly describes other specific trading topic(s) without the requested topic
+  // 2. OR if server metadata explicitly describes non-trading content without market context
   // 3. OR if server metadata has a description but zero trading context
   // then any external snippet mentioning the query topic is treated as uncorroborated / misleading.
   const hasServerContradiction = hasNonTradingContext(serverText);
   const hasServerTradingContext = hasGeneralTradingContext(serverText) || serverTopics.length > 0;
-  const serverHasOtherSpecificTopics = serverTopics.length > 0 && !directTopicMatch;
-
+  // A Forex server may also discuss Options or Gold; the presence of a different
+  // trading topic is NOT evidence that it never discusses the requested topic.
+  // Source-only evidence is deliberately lower-scored and labelled as unconfirmed.
+  const hasExplicitDifferentServerTopic =
+    !directTopicMatch && serverTopics.length > 0 && Boolean(invite.community?.description);
   const isMisleadingSnippet =
     !directTopicMatch &&
     sourceTopicMatches.length > 0 &&
-    (hasServerContradiction || serverHasOtherSpecificTopics || (!hasServerTradingContext && Boolean(invite.community?.description)));
+    (hasServerContradiction || hasExplicitDifferentServerTopic ||
+      (!hasServerTradingContext && Boolean(invite.community?.description)));
 
   const sourceOnlyTopicMatch = !directTopicMatch && sourceTopicMatches.length > 0 && !isMisleadingSnippet;
 
@@ -74,7 +78,7 @@ export function calculateInviteScore(
     explanations.push(`Server metadata matches requested topic(s): ${serverTopicMatches.join(', ')} (+${topicRelevance} pts)`);
   } else if (sourceOnlyTopicMatch) {
     topicRelevance = 10;
-    explanations.push(`Requested topic appears in external source snippets; supported by server trading context (+10 pts)`);
+    explanations.push(`Potential topic match: requested topic appears in external snippets, not verified in server metadata (+10 pts)`);
   } else if (isMisleadingSnippet) {
     explanations.push('Requested topic appears only in search snippets; server metadata indicates non-trading or unrelated content (+0 pts)');
   } else {
@@ -98,8 +102,16 @@ export function calculateInviteScore(
   // Use community metadata first; external snippets are lower-confidence signals.
   const serverLanguage = detectLanguageEvidence(serverText);
   const sourceLanguage = detectLanguageEvidence(sourceText);
-  const languageEvidence = serverLanguage.language ? serverLanguage : sourceLanguage;
-  const languageFromServer = serverLanguage.language !== null;
+  // A short generic name ("Trading Group") can have weak English hints even
+  // when the source post is clearly written in another language. Prefer a high-
+  // confidence source classification over medium server boilerplate, but never
+  // override high-confidence server evidence with a conflicting source snippet.
+  const preferSource =
+    sourceLanguage.language !== null &&
+    (serverLanguage.language === null ||
+      (serverLanguage.confidence !== 'high' && sourceLanguage.confidence === 'high'));
+  const languageEvidence = preferSource ? sourceLanguage : serverLanguage;
+  const languageFromServer = !preferSource && serverLanguage.language !== null;
   const hasTargetLanguage = requestedLanguages.length > 0;
   const languageKnown = languageEvidence.language !== null;
   const languageMatches = languageKnown && requestedLanguages.includes(languageEvidence.language!);
@@ -114,7 +126,7 @@ export function calculateInviteScore(
     explanations.push(`Server text suggests requested language [${languageEvidence.language}] (${languageEvidence.confidence} confidence) (+15 pts)`);
   } else if (languageMatches) {
     languageMatch = 4;
-    explanations.push(`Only external snippets suggest language [${languageEvidence.language}]; not confirmed by server (+4 pts)`);
+    explanations.push(`Potential language match: public source snippets suggest [${languageEvidence.language}], not verified in server metadata (+4 pts)`);
   } else {
     explanations.push(`Available text suggests [${languageEvidence.language}], not requested language(s) [${requestedLanguages.join(', ')}] (+0 pts)`);
   }
@@ -265,8 +277,11 @@ export function rankInviteResults(
 
   ranked.sort(compareRankedResults);
 
+  // Deduplicate communities by Discord Guild ID while preserving multi-source provenance
+  const deduplicated = deduplicateCommunityResults(ranked);
+
   if (options?.strictFilter === false) {
-    return ranked;
+    return deduplicated;
   }
 
   // Strict relevance filtering:
@@ -274,7 +289,7 @@ export function rankInviteResults(
   // 1. Credible requested-language evidence (if requestedLanguages specified)
   // 2. Credible requested-topic evidence (if requestedTopics specified)
   // Never fill missing slots with English, unknown language, or unrelated topic communities.
-  return ranked.filter((res) => {
+  return deduplicated.filter((res) => {
     // 1. Language relevance check
     if (requestedLanguages.length > 0) {
       if (
@@ -294,4 +309,96 @@ export function rankInviteResults(
 
     return true;
   });
+}
+
+/**
+ * Deduplicates community results by Discord guild ID (`invite.community.id`).
+ *
+ * Rules:
+ * - When `community.id` is present, multiple invites for the same guild are merged.
+ * - The highest-scoring / valid invite is retained as the primary record.
+ * - Alternative invite codes are preserved in `alternateInviteCodes`.
+ * - Multi-source provenance is preserved by merging all `sources` from all duplicates.
+ * - NEVER deduplicates solely by server name or member count. Distinct guilds with identical names
+ *   or member counts MUST remain separate entries.
+ * - Invites without a guild ID are preserved individually by invite code.
+ */
+export function deduplicateCommunityResults(
+  results: RankedInviteResult[]
+): RankedInviteResult[] {
+  const guildMap = new Map<string, RankedInviteResult>();
+  const deduplicated: RankedInviteResult[] = [];
+
+  for (const item of results) {
+    const guildId = item.invite.community?.id?.trim();
+
+    if (!guildId) {
+      // No guild ID available (e.g. invalid invite or missing metadata)
+      // Keep individual result without deduplicating by server name or member count
+      deduplicated.push({
+        ...item,
+        alternateInviteCodes: item.alternateInviteCodes || [],
+      });
+      continue;
+    }
+
+    const existing = guildMap.get(guildId);
+    if (!existing) {
+      // First time seeing this guild ID
+      const cloned: RankedInviteResult = {
+        ...item,
+        alternateInviteCodes: [...(item.alternateInviteCodes || [])],
+        sources: [...item.sources],
+      };
+      guildMap.set(guildId, cloned);
+      deduplicated.push(cloned);
+    } else {
+      // Duplicate guild ID found! Merge with existing primary record.
+      // 1. Record alternate invite code if different from primary code
+      if (!existing.alternateInviteCodes) {
+        existing.alternateInviteCodes = [];
+      }
+      if (item.invite.code && item.invite.code !== existing.invite.code) {
+        if (!existing.alternateInviteCodes.includes(item.invite.code)) {
+          existing.alternateInviteCodes.push(item.invite.code);
+        }
+      }
+      if (item.alternateInviteCodes && item.alternateInviteCodes.length > 0) {
+        for (const code of item.alternateInviteCodes) {
+          if (code !== existing.invite.code && !existing.alternateInviteCodes.includes(code)) {
+            existing.alternateInviteCodes.push(code);
+          }
+        }
+      }
+
+      // 2. Merge sources (preserving multi-source provenance without duplicate source URLs)
+      const existingUrls = new Set(existing.sources.map((s) => s.sourceUrl));
+      for (const s of item.sources) {
+        if (!existingUrls.has(s.sourceUrl)) {
+          existing.sources.push(s);
+          existingUrls.add(s.sourceUrl);
+        }
+      }
+
+      // 3. If the newly seen invite is higher scoring or is valid while existing is invalid, promote it
+      if (
+        (item.invite.status === 'valid' && existing.invite.status !== 'valid') ||
+        (item.score > existing.score && (item.invite.status === existing.invite.status || item.invite.status === 'valid'))
+      ) {
+        const oldCode = existing.invite.code;
+        if (oldCode && !existing.alternateInviteCodes.includes(oldCode)) {
+          existing.alternateInviteCodes.push(oldCode);
+        }
+        existing.alternateInviteCodes = existing.alternateInviteCodes.filter((c) => c !== item.invite.code);
+        existing.invite = item.invite;
+        existing.score = item.score;
+        existing.scoreBreakdown = item.scoreBreakdown;
+        existing.detectedTopics = Array.from(new Set([...existing.detectedTopics, ...item.detectedTopics]));
+        existing.detectedLanguage = item.detectedLanguage;
+        existing.isVerifiedFact = item.isVerifiedFact;
+      }
+    }
+  }
+
+  return deduplicated;
 }

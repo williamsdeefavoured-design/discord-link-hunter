@@ -110,6 +110,7 @@ describe('Dry Run Engine & API Guarantees', () => {
     const unconfirmedRes = await app.inject({
       method: 'POST',
       url: `/api/jobs/${dryJob.id}/execute`,
+      headers: { 'x-api-key': 'dlh_dev_secret_key' },
       payload: {},
     });
 
@@ -121,6 +122,7 @@ describe('Dry Run Engine & API Guarantees', () => {
     const confirmedRes = await app.inject({
       method: 'POST',
       url: `/api/jobs/${dryJob.id}/execute`,
+      headers: { 'x-api-key': 'dlh_dev_secret_key' },
       payload: { confirm: true },
     });
 

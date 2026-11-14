@@ -26,12 +26,13 @@ describe('Database Schema Repair & Bot Startup Verification', () => {
     }
   });
 
-  it('verifies all Discord slash commands remain properly configured', () => {
+  it('verifies enabled Discord slash commands remain properly configured', () => {
     const commandNames = slashCommands.map((c) => c.name);
-    const expected = ['ping', 'hunt', 'deepsearch', 'verify', 'results', 'status', 'export', 'dashboard'];
+    const expected = ['ping', 'hunt', 'verify', 'results', 'status', 'export', 'dashboard'];
     for (const cmd of expected) {
       expect(commandNames).toContain(cmd);
     }
+    expect(commandNames).not.toContain('deepsearch');
   });
 
   it('renders languageFilterNotice in bot results embed when present', () => {

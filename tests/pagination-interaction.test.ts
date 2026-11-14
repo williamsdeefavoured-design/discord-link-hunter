@@ -120,10 +120,10 @@ describe('Discord Results Button Pagination Interactions', () => {
       callOrder.push('deferUpdate');
     });
 
-    const origGetResults = mockRepo.getJobResults.bind(mockRepo);
-    mockRepo.getJobResults = async (id: string) => {
-      callOrder.push('getJobResults');
-      return origGetResults(id);
+    const origGetJob = mockRepo.getJob.bind(mockRepo);
+    mockRepo.getJob = async (id: string) => {
+      callOrder.push('getJob');
+      return origGetJob(id);
     };
 
     const interaction: any = {
@@ -142,7 +142,7 @@ describe('Discord Results Button Pagination Interactions', () => {
     // 1. deferUpdate must be called BEFORE data fetching
     expect(deferUpdateSpy).toHaveBeenCalledTimes(1);
     expect(callOrder[0]).toBe('deferUpdate');
-    expect(callOrder[1]).toBe('getJobResults');
+    expect(callOrder[1]).toBe('getJob');
 
     // 2. editReply must update message with page 2
     expect(editReplySpy).toHaveBeenCalledTimes(1);

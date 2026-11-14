@@ -2,65 +2,52 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Compass, ListFilter, Activity, Settings, ShieldCheck, Terminal } from 'lucide-react';
+import { Compass, ListFilter, Activity, Settings, ShieldCheck, ScanSearch } from 'lucide-react';
 
 const NAV_ITEMS = [
   { name: 'Overview', href: '/', icon: Activity },
   { name: 'Discover', href: '/discover', icon: Compass },
   { name: 'Jobs', href: '/jobs', icon: ListFilter },
   { name: 'Results', href: '/results', icon: ShieldCheck },
-  { name: 'Settings', href: '/settings', icon: Settings },
+  { name: 'System', href: '/settings', icon: Settings },
 ];
 
 export function Navigation() {
   const pathname = usePathname();
-
   return (
-    <nav className="border-b border-slate-800 bg-slate-950/80 backdrop-blur sticky top-0 z-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
-          <div className="flex items-center space-x-3">
-            <div className="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-500/30">
-              <Compass className="w-5 h-5" />
+    <header className="sticky top-0 z-50 border-b border-[#263345] bg-[#0b111aec] backdrop-blur-lg">
+      <div className="max-w-[1420px] mx-auto px-4 sm:px-7 xl:px-10">
+        <div className="min-h-[72px] flex items-center justify-between gap-5">
+          <Link href="/" className="flex items-center gap-3 shrink-0 group" aria-label="Link Hunter home">
+            <div className="h-10 w-10 rounded-[9px] border border-[#54788b] bg-[#173142] flex items-center justify-center text-[#a9d8e6] group-hover:border-[#87bbc6] transition-colors">
+              <ScanSearch className="h-5 w-5" strokeWidth={1.65} />
             </div>
-            <div>
-              <span className="font-bold text-lg text-white tracking-tight">Discord Link Hunter</span>
-              <span className="ml-2 text-xs font-semibold px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                v2.1
-              </span>
+            <div className="flex flex-col leading-tight">
+              <span className="text-[16px] font-bold tracking-[-.055em] text-[#eff5fa]">LINK HUNTER<span className="text-[#7db6ba]">.</span></span>
+              <span className="text-[9px] tracking-[.16em] text-[#8b9cac] font-semibold uppercase">Research intelligence</span>
             </div>
-          </div>
-
-          <div className="flex items-center space-x-1 sm:space-x-4">
-            {NAV_ITEMS.map((item) => {
-              const Icon = item.icon;
-              const isActive = pathname === item.href;
-              return (
-                <Link
-                  key={item.name}
-                  href={item.href}
-                  className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                    isActive
-                      ? 'bg-indigo-600/20 text-indigo-300 border border-indigo-500/30'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-                  }`}
-                >
-                  <Icon className="w-4 h-4" />
-                  <span>{item.name}</span>
-                </Link>
-              );
-            })}
-          </div>
-
-          <div className="hidden md:flex items-center space-x-2">
-            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-              <span className="w-1.5 h-1.5 mr-1.5 bg-emerald-400 rounded-full animate-pulse"></span>
-              Ready
-            </span>
-          </div>
+          </Link>
+          <nav className="hidden md:flex items-stretch gap-1 self-stretch" aria-label="Main navigation">
+            {NAV_ITEMS.map(({ name, href, icon: Icon }) => (
+              <Link key={href} href={href} data-current={pathname === href} aria-current={pathname === href ? 'page' : undefined}
+                className={`workspace-nav-link inline-flex items-center gap-2 px-3.5 pt-[3px] text-[13px] font-medium ${pathname === href ? '' : 'text-[#8f9fb0]'}`}>
+                <Icon className="h-[14px] w-[14px]" strokeWidth={1.7} /><span>{name}</span>
+              </Link>
+            ))}
+          </nav>
+          <span className="hidden xl:flex items-center gap-2 text-[10px] tracking-[.13em] uppercase text-[#9eafc0]">
+            <span className="h-1.5 w-1.5 rounded-full bg-[#73b9aa]" aria-hidden="true" /> Private workspace
+          </span>
         </div>
+        <nav className="md:hidden flex items-center gap-1 overflow-x-auto -mx-2 px-2 pb-0" aria-label="Mobile navigation">
+          {NAV_ITEMS.map(({ name, href, icon: Icon }) => (
+            <Link key={href} href={href} data-current={pathname === href} aria-current={pathname === href ? 'page' : undefined}
+              className={`workspace-nav-link inline-flex shrink-0 items-center gap-1.5 px-3 py-3 text-[12px] ${pathname === href ? '' : 'text-[#91a4b5]'}`}>
+              <Icon className="h-3.5 w-3.5" /><span>{name}</span>
+            </Link>
+          ))}
+        </nav>
       </div>
-    </nav>
+    </header>
   );
 }
-

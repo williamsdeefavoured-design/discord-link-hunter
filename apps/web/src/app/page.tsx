@@ -1,133 +1,127 @@
+'use client';
+
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Compass, ShieldCheck, CheckCircle2, Search, ArrowRight, Database, Terminal } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, Activity, Compass, Database, Globe2, Layers3, ShieldCheck, Clock3 } from 'lucide-react';
+import { apiFetch } from '../lib/api';
+import type { SearchJob } from '@discord-link-hunter/core';
+
+type Health = { database?: { connected?: boolean }; providers?: { serper?: boolean; tavily?: boolean } };
+
+const label = (status: string) => status.replace(/_/g, ' ');
 
 export default function OverviewPage() {
+  const [jobs, setJobs] = useState<SearchJob[]>([]);
+  const [health, setHealth] = useState<Health | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [jobsError, setJobsError] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      const [jobsResponse, healthResponse] = await Promise.all([
+        apiFetch<{ jobs: SearchJob[] }>('/api/jobs?limit=50'),
+        apiFetch<Health>('/health'),
+      ]);
+      if (!active) return;
+      if (jobsResponse.ok && jobsResponse.data?.jobs) {
+        setJobs(jobsResponse.data.jobs.filter((job) => job.mode === 'live' && !job.isSimulated));
+        setJobsError(false);
+      } else setJobsError(true);
+      if (healthResponse.ok && healthResponse.data) setHealth(healthResponse.data);
+      setLoading(false);
+    };
+    void load();
+    return () => { active = false; };
+  }, []);
+
+  const completed = jobs.filter((job) => job.status === 'completed').length;
+  const live = jobs.filter((job) => job.mode === 'live').length;
+  const latest = jobs[0];
+  const metrics = [
+    { title: 'Recent jobs', number: loading || jobsError ? '—' : String(jobs.length), detail: 'Last 50 records', icon: Layers3 },
+    { title: 'Completed', number: loading || jobsError ? '—' : String(completed), detail: 'Successful job records', icon: ShieldCheck },
+    { title: 'Live searches', number: loading || jobsError ? '—' : String(live), detail: 'Among recent jobs', icon: Globe2 },
+    { title: 'Database', number: health ? (health.database?.connected ? 'Online' : 'Offline') : '—', detail: 'PostgreSQL connection', icon: Database },
+  ];
+
   return (
-    <div className="space-y-8">
-      {/* Top Banner */}
-      <div className="rounded-xl border border-indigo-500/20 bg-gradient-to-r from-indigo-950/40 via-slate-900/60 to-purple-950/30 p-6 md:p-8 relative overflow-hidden">
-        <div className="relative z-10 max-w-2xl">
-          <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full text-xs font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 mb-4">
-            <span>Deterministic Ranking & Bounded Quotas</span>
+    <div className="space-y-7 md:space-y-9">
+      <div className="workspace-hero flex flex-col lg:flex-row lg:items-end justify-between gap-6 border-b border-[#293849] pb-7 md:pb-9 px-2 md:px-5 pt-3 md:pt-5">
+        <div className="space-y-4 max-w-[760px]">
+          <div className="workspace-kicker flex items-center gap-3"><span className="w-7 h-px bg-[#82b6c6]" /> Discovery operations / v2.1</div>
+          <h1 className="workspace-heading">Find the signal.<br /><span className="text-[#8eafb8]">Verify the source.</span></h1>
+          <p className="workspace-lede text-sm md:text-[15px]">Research public trading communities across social, publishing and discussion platforms. Inspect the evidence behind every result before you act.</p>
+          <div className="pt-1 flex flex-wrap gap-3">
+            <Link href="/discover" className="workspace-button"><Compass className="w-4 h-4" /> New discovery <ArrowUpRight className="w-4 h-4" /></Link>
+            <Link href="/jobs" className="workspace-button workspace-button-secondary">Review jobs <ArrowRight className="w-4 h-4" /></Link>
           </div>
-          <h1 className="text-3xl font-extrabold text-white tracking-tight sm:text-4xl">
-            Find, Validate, and Rank Trading Discord Communities
-          </h1>
-          <p className="mt-3 text-slate-300 text-sm md:text-base leading-relaxed">
-            Multilingual search across 6 languages (EN, DE, ES, PT, FR, AR). Automatic canonicalization,
-            Discord API verification, SSRF defense, and transparent scoring without scraping private servers.
-          </p>
-          <div className="mt-6 flex flex-wrap gap-3">
-            <Link
-              href="/discover"
-              className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium text-sm transition shadow-lg shadow-indigo-600/30"
-            >
-              <Compass className="w-4 h-4" />
-              <span>Start Discovery Job</span>
-            </Link>
-            <Link
-              href="/results"
-              className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium text-sm transition border border-slate-700"
-            >
-              <span>Explore Seed Demo Results</span>
-              <ArrowRight className="w-4 h-4" />
-            </Link>
+        </div>
+        <div className="lg:w-[290px] workspace-panel p-5 space-y-4">
+          <div className="flex items-center justify-between"><span className="workspace-kicker">Research stack</span><Activity className="w-4 h-4 text-[#82b0bb]" /></div>
+          <div className="space-y-3 text-[12px] text-[#aabac8]">
+            <div className="flex justify-between"><span>Search providers</span><span className="text-[#e5f0f5]">Serper / Tavily</span></div>
+            <div className="workspace-divider" />
+            <div className="flex justify-between"><span>Supported languages</span><span className="text-[#e5f0f5]">06</span></div>
+            <div className="workspace-divider" />
+            <div className="flex justify-between"><span>Public source categories</span><span className="text-[#e5f0f5]">10</span></div>
           </div>
+          <p className="text-[11px] text-[#849bad] leading-relaxed">Verification confirms invitation status, not a community’s trustworthiness or financial advice quality.</p>
         </div>
       </div>
 
-      {/* Metric Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="p-5 rounded-xl border border-slate-800 bg-slate-900/50">
-          <div className="flex items-center justify-between text-slate-400 text-xs font-medium uppercase tracking-wider">
-            <span>Discovered Invites</span>
-            <Search className="w-4 h-4 text-indigo-400" />
-          </div>
-          <div className="mt-2 text-2xl font-bold text-white">48+</div>
-          <p className="mt-1 text-xs text-slate-500">Across Google, Serper, and Tavily</p>
+      <section className="space-y-3" aria-label="Recent job metrics">
+        <div className="flex items-center justify-between gap-3"><span className="workspace-kicker">Operational snapshot</span><span className="workspace-meta">Live records · no sample metrics</span></div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {metrics.map(({ title, number, detail, icon: Icon }) => (
+            <div className="workspace-card p-4 md:p-5" key={title}>
+              <div className="flex items-center justify-between gap-2 text-[#9fb2c3]"><span className="text-[12px]">{title}</span><Icon className="w-4 h-4" strokeWidth={1.6} /></div>
+              <div className="workspace-stat-number mt-4">{number}</div><div className="workspace-meta mt-1">{detail}</div>
+            </div>
+          ))}
         </div>
+      </section>
 
-        <div className="p-5 rounded-xl border border-slate-800 bg-slate-900/50">
-          <div className="flex items-center justify-between text-slate-400 text-xs font-medium uppercase tracking-wider">
-            <span>Verified Active</span>
-            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+      <div className="grid lg:grid-cols-[1.55fr_1fr] gap-4">
+        <section className="workspace-panel overflow-hidden">
+          <div className="flex justify-between items-center px-5 md:px-6 py-5 border-b border-[#293849]">
+            <div><div className="workspace-kicker">Recent activity</div><h2 className="text-[17px] font-semibold mt-1 text-[#eaf1f6]">Search jobs</h2></div>
+            <Link className="text-[12px] text-[#93c4d4] hover:text-white inline-flex items-center gap-1" href="/jobs">All jobs <ArrowUpRight className="w-3.5 h-3.5" /></Link>
           </div>
-          <div className="mt-2 text-2xl font-bold text-emerald-400">100% Validated</div>
-          <p className="mt-1 text-xs text-slate-500">Via official Discord endpoints</p>
-        </div>
-
-        <div className="p-5 rounded-xl border border-slate-800 bg-slate-900/50">
-          <div className="flex items-center justify-between text-slate-400 text-xs font-medium uppercase tracking-wider">
-            <span>Supported Languages</span>
-            <span className="text-xs font-mono text-purple-400">6 Codes</span>
+          {jobsError ? (
+            <div className="px-6 py-10 text-[#c4aa8d] text-sm">Could not load job data. Check the API connection in System.</div>
+          ) : loading ? (
+            <div className="px-6 py-10 text-[#8e9cae] text-sm">Loading recent jobs…</div>
+          ) : jobs.length === 0 ? (
+            <div className="px-6 py-10 text-[#95aabc] text-sm">No live research jobs yet. Launch a discovery to get started.</div>
+          ) : (
+            <div className="divide-y divide-[#283749]">
+              {jobs.slice(0, 5).map((job) => (
+                <Link key={job.id} href={`/results?job=${encodeURIComponent(job.id)}`} className="flex gap-3 items-center justify-between px-5 md:px-6 py-4 hover:bg-[#1c2b3a] transition-colors">
+                  <div className="min-w-0"><div className="text-[12px] font-mono text-[#d8e4ec] truncate">{job.id}</div><div className="workspace-meta mt-1">{job.mode.toUpperCase()} · {job.params?.topics?.join(', ') || 'General research'}</div></div>
+                  <div className="flex gap-2 items-center shrink-0"><span className="text-[11px] text-[#93bdc7] capitalize">{label(job.status)}</span><ArrowUpRight className="w-4 h-4 text-[#82a4b2]" /></div>
+                </Link>
+              ))}
+            </div>
+          )}
+        </section>
+        <section className="workspace-panel p-5 md:p-6 flex flex-col justify-between gap-7">
+          <div><span className="workspace-kicker">Workflow / 03 stages</span><h2 className="text-[17px] font-semibold text-[#eaf1f6] mt-2">Research with evidence</h2></div>
+          <div className="space-y-5">
+            {[
+              ['01','Discover','Search indexed public platforms and collect candidate invites.'],
+              ['02','Validate','Confirm invite status and retain source provenance.'],
+              ['03','Review','Compare relevance scores and export findings.'],
+            ].map(([num,title,desc]) => (
+              <div className="flex items-start gap-4" key={num}>
+                <span className="font-mono text-[12px] text-[#83b4c6] pt-0.5">{num}</span>
+                <div className="flex-1"><div className="text-[13px] text-[#e2eaf0] font-semibold">{title}</div><p className="text-[12px] leading-relaxed text-[#92a6b8] mt-1">{desc}</p></div>
+              </div>
+            ))}
           </div>
-          <div className="mt-2 text-2xl font-bold text-white">EN, DE, ES, PT, FR, AR</div>
-          <p className="mt-1 text-xs text-slate-500">Native trading dictionary mapping</p>
-        </div>
-
-        <div className="p-5 rounded-xl border border-slate-800 bg-slate-900/50">
-          <div className="flex items-center justify-between text-slate-400 text-xs font-medium uppercase tracking-wider">
-            <span>System State</span>
-            <Database className="w-4 h-4 text-cyan-400" />
-          </div>
-          <div className="mt-2 text-2xl font-bold text-white">Mock & Live Ready</div>
-          <p className="mt-1 text-xs text-slate-500">Fastify API + Discord Bot + Next.js</p>
-        </div>
-      </div>
-
-      {/* Dual Interface Access */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="p-6 rounded-xl border border-slate-800 bg-slate-900/30">
-          <div className="flex items-center space-x-3 mb-3">
-            <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-400">
-              <Terminal className="w-5 h-5" />
-            </div>
-            <h2 className="text-lg font-bold text-white">Discord Slash Commands</h2>
-          </div>
-          <p className="text-sm text-slate-400 mb-4">
-            Invoke directly inside your Discord server using guild-scoped slash commands:
-          </p>
-          <ul className="text-xs text-slate-300 space-y-2 font-mono bg-slate-950 p-3 rounded-lg border border-slate-800">
-            <li><span className="text-indigo-400">/ping</span> - Check bot and API latency</li>
-            <li><span className="text-indigo-400">/hunt</span> topic:forex language:en - Queue bounded search</li>
-            <li><span className="text-indigo-400">/verify</span> invite:https://discord.gg/... - Check invite status</li>
-            <li><span className="text-indigo-400">/export</span> job:id format:csv - Download verified records</li>
-          </ul>
-        </div>
-
-        <div className="p-6 rounded-xl border border-slate-800 bg-slate-900/30">
-          <div className="flex items-center space-x-3 mb-3">
-            <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400">
-              <ShieldCheck className="w-5 h-5" />
-            </div>
-            <h2 className="text-lg font-bold text-white">Explainable Scoring Model</h2>
-          </div>
-          <p className="text-sm text-slate-400 mb-4">
-            Every candidate is ranked with a deterministic 0-100 score based on verified facts:
-          </p>
-          <div className="grid grid-cols-2 gap-2 text-xs text-slate-300">
-            <div className="p-2 rounded bg-slate-950 border border-slate-800">
-              <span className="text-indigo-400 font-bold">35 pts:</span> Topic relevance
-            </div>
-            <div className="p-2 rounded bg-slate-950 border border-slate-800">
-              <span className="text-indigo-400 font-bold">20 pts:</span> Invite active/valid
-            </div>
-            <div className="p-2 rounded bg-slate-950 border border-slate-800">
-              <span className="text-indigo-400 font-bold">15 pts:</span> Language match
-            </div>
-            <div className="p-2 rounded bg-slate-950 border border-slate-800">
-              <span className="text-indigo-400 font-bold">10 pts:</span> Provenance / sources
-            </div>
-            <div className="p-2 rounded bg-slate-950 border border-slate-800">
-              <span className="text-indigo-400 font-bold">10 pts:</span> Verification freshness
-            </div>
-            <div className="p-2 rounded bg-slate-950 border border-slate-800">
-              <span className="text-indigo-400 font-bold">10 pts:</span> Verified member size
-            </div>
-          </div>
-        </div>
+          <Link className="inline-flex items-center gap-1 text-[12px] text-[#9dc9d8] hover:text-[#fff]" href="/results">Open results workspace <ArrowRight className="w-4 h-4" /></Link>
+        </section>
       </div>
     </div>
   );
 }
-

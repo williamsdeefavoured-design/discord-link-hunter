@@ -2,7 +2,12 @@ import fastify, { FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
 import { z } from 'zod';
-import { getConfig, getRedactedConfigSummary } from '@discord-link-hunter/config';
+import {
+  getAllowedCorsOrigins,
+  getConfig,
+  getRedactedConfigSummary,
+  getValidApiKeys,
+} from '@discord-link-hunter/config';
 import {
   canonicalizeDiscordInvite,
   compareRankedResults,
@@ -20,7 +25,15 @@ import {
   testDatabaseConnection,
 } from '@discord-link-hunter/db';
 
-export function buildServer(customRepo?: LinkHunterRepository): FastifyInstance {
+export interface ServerOptions {
+  apiKey?: string;
+  bypassAuth?: boolean;
+}
+
+export function buildServer(
+  customRepo?: LinkHunterRepository,
+  options?: ServerOptions
+): FastifyInstance {
   const app = fastify({
     logger: false,
   });
@@ -29,7 +42,7 @@ export function buildServer(customRepo?: LinkHunterRepository): FastifyInstance 
 
   // CORS configuration
   app.register(cors, {
-    origin: [config.WEB_ORIGIN, 'http://localhost:3000', 'http://127.0.0.1:3000'],
+    origin: getAllowedCorsOrigins(),
     methods: ['GET', 'POST', 'OPTIONS'],
   });
 
@@ -42,6 +55,54 @@ export function buildServer(customRepo?: LinkHunterRepository): FastifyInstance 
   const repo = customRepo || getRepository();
   const queue = new JobQueueManager(repo);
 
+  // Authentication preHandler hook for sensitive routes
+  app.addHook('onRequest', async (req, reply) => {
+    // Public endpoints
+    const url = req.url.split('?')[0];
+    if (url === '/health' || url === '/api/sources' || req.method === 'OPTIONS') {
+      return;
+    }
+
+    // Bypass auth if specifically instructed in test options
+    if (options?.bypassAuth) {
+      return;
+    }
+
+    // Extract API key or Bearer token
+    let token: string | null = null;
+    const headerKey = req.headers['x-api-key'];
+    if (typeof headerKey === 'string' && headerKey.trim()) {
+      token = headerKey.trim();
+    } else {
+      const authHeader = req.headers['authorization'];
+      if (typeof authHeader === 'string' && authHeader.trim()) {
+        const match = authHeader.match(/^Bearer\s+(.+)$/i);
+        if (match && match[1]) {
+          token = match[1].trim();
+        }
+      }
+    }
+
+    if (!token) {
+      return reply.status(401).send({
+        error: 'Unauthorized',
+        message: 'Authentication required. Provide an API key via x-api-key header or Authorization: Bearer <token>.',
+      });
+    }
+
+    const validKeys = [
+      ...(options?.apiKey ? [options.apiKey] : []),
+      ...getValidApiKeys(),
+    ];
+
+    if (!validKeys.includes(token)) {
+      return reply.status(403).send({
+        error: 'Forbidden',
+        message: 'Invalid API key or authorization token.',
+      });
+    }
+  });
+
   // Health check
   app.get('/health', async () => {
     const dbStatus = await testDatabaseConnection();
@@ -52,8 +113,7 @@ export function buildServer(customRepo?: LinkHunterRepository): FastifyInstance 
       database: {
         connected: dbStatus.connected,
         usingMockRepo: repo.isMock,
-        endpoint: dbStatus.endpoint,
-        error: dbStatus.error,
+        // Do not expose database hostnames or internal errors from a public check.
       },
       providers: {
         serper: Boolean(config.SERPER_API_KEY),
@@ -83,7 +143,11 @@ export function buildServer(customRepo?: LinkHunterRepository): FastifyInstance 
     }
 
     const params = parsed.data;
-    const job = await queue.createJob(params, 'api-user', params.mode);
+    const automatedTest = process.env.NODE_ENV === 'test' || process.env.VITEST === 'true';
+    if (params.mode === 'mock' && !automatedTest) {
+      return reply.status(400).send({ error: 'Simulated discovery mode is disabled.' });
+    }
+    const job = await queue.createJob(params, 'api-user', automatedTest ? params.mode : 'live');
 
     // Process job asynchronously without blocking HTTP response
     queue.processJob(job.id).catch((err) => {
@@ -116,6 +180,32 @@ export function buildServer(customRepo?: LinkHunterRepository): FastifyInstance 
     return job;
   });
 
+  // Irreversible job deletion: authenticated by the existing API request hook.
+  app.delete('/api/jobs/:id', async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = (req.body || {}) as { confirm?: boolean; jobId?: string };
+    if (!id || id.length > 64 || body.confirm !== true || body.jobId !== id) {
+      return reply.status(400).send({ error: 'Confirm deletion by supplying { confirm: true, jobId: <exact job ID> }.' });
+    }
+    const job = await repo.getJob(id);
+    if (!job) return reply.status(404).send({ error: 'Job not found or already deleted.' });
+    if (job.status === 'queued' || job.status === 'running') {
+      return reply.status(409).send({ error: 'Finish or cancel the running job before deleting it.' });
+    }
+    try {
+      const deleted = await repo.deleteJob(id);
+      if (!deleted) return reply.status(404).send({ error: 'Job not found or already deleted.' });
+      return reply.status(200).send({ deleted: true, jobId: id });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Delete failed';
+      if (message.startsWith('Cannot delete a queued or running job')) {
+        return reply.status(409).send({ error: message });
+      }
+      req.log.error({ err: error }, 'Failed to delete job');
+      return reply.status(500).send({ error: 'Unable to delete job. No deletion was confirmed.' });
+    }
+  });
+
   // Cancel job
   app.post('/api/jobs/:id/cancel', async (req, reply) => {
     const { id } = req.params as { id: string };
@@ -141,11 +231,14 @@ export function buildServer(customRepo?: LinkHunterRepository): FastifyInstance 
     if (!job) {
       return reply.status(404).send({ error: 'Job not found' });
     }
+    if (job.mode === 'mock' && process.env.NODE_ENV !== 'test' && process.env.VITEST !== 'true') {
+      return reply.status(400).send({ error: 'Historical simulated plans cannot be executed in Live Mode.' });
+    }
 
     // Check usage limits if in live mode
     if (job.mode === 'live') {
       const stats = await repo.getProviderStats();
-      const currentRequests = stats.serper?.requests || stats.tavily?.requests || 0;
+      const currentRequests = (stats.serper?.requests || 0) + (stats.tavily?.requests || 0);
       const plannedCost = job.estimatedRequests || 1;
       if (currentRequests + plannedCost > config.SEARCH_DAILY_PROVIDER_REQUEST_CAP) {
         return reply.status(429).send({
@@ -175,6 +268,15 @@ export function buildServer(customRepo?: LinkHunterRepository): FastifyInstance 
     });
   });
 
+  // Recover abandoned jobs after an unexpected server crash
+  app.post('/api/jobs/recover', async () => {
+    const recovery = await queue.recoverAbandonedJobs({ olderThanMs: 30 * 60 * 1000 });
+    return {
+      message: `Recovered ${recovery.recoveredCount} abandoned job(s)`,
+      ...recovery,
+    };
+  });
+
   // Get configurable research sources
   app.get('/api/sources', async () => {
     return { sources: DEFAULT_RESEARCH_SOURCES };
@@ -193,6 +295,9 @@ export function buildServer(customRepo?: LinkHunterRepository): FastifyInstance 
 
     let results = await repo.getJobResults(id);
     const job = await repo.getJob(id);
+    const totalStored = results.length;
+    const inactiveCount = results.filter((r) => r.invite.status !== 'valid').length;
+    const activeStoredCount = totalStored - inactiveCount;
 
     if (query.minScore) {
       const minScore = parseInt(query.minScore, 10);
@@ -200,7 +305,13 @@ export function buildServer(customRepo?: LinkHunterRepository): FastifyInstance 
     }
 
     if (query.status) {
-      results = results.filter((r) => r.invite.status === query.status);
+      if (query.status === 'valid') {
+        results = results.filter((r) => r.invite.status === 'valid');
+      } else if (query.status === 'expired_or_revoked') {
+        results = results.filter((r) => r.invite.status !== 'valid');
+      } else if (query.status !== 'all') {
+        results = results.filter((r) => r.invite.status === query.status);
+      }
     }
 
     if (query.topic) {
@@ -237,6 +348,10 @@ export function buildServer(customRepo?: LinkHunterRepository): FastifyInstance 
     return {
       jobId: id,
       count: results.length,
+      totalCount: totalStored,
+      excludedCount: totalStored - results.length,
+      inactiveCount,
+      activeStoredCount,
       results,
       potentialLeads,
     };

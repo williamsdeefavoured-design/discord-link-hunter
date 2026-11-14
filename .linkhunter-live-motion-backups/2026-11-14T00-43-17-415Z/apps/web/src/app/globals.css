@@ -1,0 +1,82 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  --background: #0b1018;
+  --panel: #131c28;
+  --panel-raised: #172231;
+  --border: #263347;
+  --foreground: #eaf0f6;
+  --muted: #98a9be;
+  --accent: #8cb9d8;
+  --mint: #58bea4;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  color: var(--foreground);
+  background: radial-gradient(circle at 84% -22%, #1b3445 0, transparent 36%), var(--background);
+  font-family: 'Aptos', 'Inter', 'Segoe UI', ui-sans-serif, system-ui, sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+::selection { background: #276278; color: #f4fafc; }
+:focus-visible { outline: 2px solid #93d8d4; outline-offset: 3px; }
+a, button { -webkit-tap-highlight-color: transparent; }
+a { transition: color 140ms ease, border-color 140ms ease; }
+
+.app-workspace { min-height: 65vh; }
+.app-workspace h1, .app-workspace h2 { letter-spacing: -.035em; }
+.app-workspace select,
+.app-workspace input:not([type='checkbox']),
+.app-workspace textarea {
+  border-color: var(--border);
+  background: #101923;
+  color: #e9f1f6;
+}
+.app-workspace select:focus,
+.app-workspace input:focus,
+.app-workspace textarea:focus { border-color: #79b9c9; outline: none; box-shadow: 0 0 0 2px #79b9c926; }
+.app-workspace .border-slate-800 { border-color: var(--border); }
+.app-workspace .bg-slate-900\/60,
+.app-workspace .bg-slate-900\/50,
+.app-workspace .bg-slate-900\/40,
+.app-workspace .bg-slate-900\/30,
+.app-workspace .bg-slate-900\/20 { background-color: #131c28; }
+.app-workspace .text-indigo-300,
+.app-workspace .text-indigo-400 { color: var(--accent); }
+.app-workspace .bg-indigo-600 { background-color: #386a85; }
+.app-workspace .bg-indigo-600:hover { background-color: #437e9c; }
+.app-workspace .border-indigo-500\/30 { border-color: #5685a963; }
+.app-workspace table { border-collapse: collapse; }
+.app-workspace thead { background: #101823; }
+.app-workspace thead th { font-size: 10px; font-weight: 650; letter-spacing: .11em; }
+.app-workspace tbody tr { transition: background-color 130ms ease; }
+.app-workspace tbody tr:hover { background: #1a2938; }
+
+.workspace-kicker { color: #81aab8; text-transform: uppercase; letter-spacing: .19em; font: 700 10px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.workspace-heading { font-size: clamp(2.1rem, 4vw, 3.65rem); line-height: 1.08; letter-spacing: -.065em; font-weight: 690; color: #f1f5f9; }
+.workspace-lede { color: #9eb1c5; line-height: 1.8; max-width: 55ch; }
+.workspace-panel { background: #121b27; border: 1px solid var(--border); border-radius: 10px; }
+.workspace-card { border: 1px solid #2a3949; border-radius: 9px; background: #121b27; }
+.workspace-meta { font: 500 11px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; color: #a5b7c8; }
+.workspace-button { display: inline-flex; align-items: center; gap: .55rem; border: 1px solid #8fbbca; border-radius: 7px; background: #9ac8d6; color: #0c1a22; font-weight: 720; padding: .78rem 1.05rem; font-size: 13px; transition: background-color 140ms ease, transform 140ms ease; }
+.workspace-button:hover { background: #b4dde7; transform: translateY(-1px); }
+.workspace-button-secondary { background: #182432; color: #c9dae8; border-color: #314455; }
+.workspace-button-secondary:hover { background: #203242; }
+.workspace-stat-number { color: #f0f5f9; font-variant-numeric: tabular-nums; font-size: clamp(1.5rem, 2.4vw, 2.25rem); letter-spacing: -.06em; font-weight: 650; }
+.workspace-divider { height: 1px; background: #2a3949; }
+.workspace-nav-link { border-bottom: 2px solid transparent; transition: color 140ms ease, border-color 140ms ease; }
+.workspace-nav-link[data-current='true'] { color: #f2f7fa; border-color: #84c9c7; }
+.workspace-nav-link:hover { color: #eef6f9; }
+.workspace-elevated { box-shadow: 0 13px 45px #0000001c; }
+.workspace-table-toolbar { background: #111c28; border: 1px solid #293949; border-radius: 9px; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}

@@ -21,6 +21,7 @@ export interface LinkHunterRepository {
   saveJob(job: SearchJob): Promise<void>;
   updateJobProgress(id: string, progress: SearchJobProgress, status?: SearchJob['status']): Promise<void>;
   getJob(id: string): Promise<SearchJob | null>;
+  deleteJob(id: string): Promise<boolean>;
   listJobs(limit?: number): Promise<SearchJob[]>;
   saveResults(jobId: string, results: RankedInviteResult[]): Promise<void>;
   getJobResults(jobId: string): Promise<RankedInviteResult[]>;
@@ -109,6 +110,18 @@ export class InMemoryRepository implements LinkHunterRepository {
 
   async getJob(id: string): Promise<SearchJob | null> {
     return this.jobs.get(id) || null;
+  }
+
+  async deleteJob(id: string): Promise<boolean> {
+    const job = this.jobs.get(id);
+    if (!job) return false;
+    if (job.status === 'queued' || job.status === 'running') {
+      throw new Error('Cannot delete a queued or running job; wait for completion or cancel it first.');
+    }
+    this.jobs.delete(id);
+    this.jobResults.delete(id);
+    this.persistToFile();
+    return true;
   }
 
   async listJobs(limit = 20): Promise<SearchJob[]> {
@@ -387,6 +400,67 @@ export class PostgresRepository implements LinkHunterRepository {
     }
 
     await db.update(schema.searchJobs).set(updateData).where(eq(schema.searchJobs.id, id));
+  }
+
+  /** Permanently delete a finished job, its results, and exclusively owned
+   * invite/source/community data. Shared cross-job records are preserved. */
+  async deleteJob(id: string): Promise<boolean> {
+    const db = getDbClient();
+    if (!db) throw new Error('Database client unavailable');
+
+    return db.transaction(async (tx) => {
+      const jobs = await tx.select({ status: schema.searchJobs.status })
+        .from(schema.searchJobs).where(eq(schema.searchJobs.id, id)).limit(1);
+      if (jobs.length === 0) return false;
+      if (jobs[0].status === 'queued' || jobs[0].status === 'running') {
+        throw new Error('Cannot delete a queued or running job; wait for completion or cancel it first.');
+      }
+
+      const jobLinks = await tx.select({ code: schema.searchJobResults.inviteCode })
+        .from(schema.searchJobResults).where(eq(schema.searchJobResults.jobId, id));
+      const inviteCodes = [...new Set(jobLinks.map((row) => row.code))];
+      const sourceIds = new Set<string>();
+      const communityIds = new Set<string>();
+
+      if (inviteCodes.length > 0) {
+        const references = await tx.select({ sourceId: schema.inviteSources.sourceId })
+          .from(schema.inviteSources).where(inArray(schema.inviteSources.inviteCode, inviteCodes));
+        for (const row of references) sourceIds.add(row.sourceId);
+        const metadata = await tx.select({ communityId: schema.invites.communityId })
+          .from(schema.invites).where(inArray(schema.invites.code, inviteCodes));
+        for (const row of metadata) {
+          if (row.communityId) communityIds.add(row.communityId);
+        }
+      }
+
+      // The existing ON DELETE CASCADE removes search_job_results automatically.
+      await tx.delete(schema.searchJobs).where(eq(schema.searchJobs.id, id));
+
+      for (const code of inviteCodes) {
+        const stillUsed = await tx.select({ code: schema.searchJobResults.inviteCode })
+          .from(schema.searchJobResults).where(eq(schema.searchJobResults.inviteCode, code)).limit(1);
+        if (stillUsed.length === 0) {
+          // invite_sources and verification_history cascade with the invite.
+          await tx.delete(schema.invites).where(eq(schema.invites.code, code));
+        }
+      }
+      for (const sourceId of sourceIds) {
+        const stillUsed = await tx.select({ id: schema.inviteSources.sourceId })
+          .from(schema.inviteSources).where(eq(schema.inviteSources.sourceId, sourceId)).limit(1);
+        if (stillUsed.length === 0) {
+          await tx.delete(schema.sources).where(eq(schema.sources.id, sourceId));
+        }
+      }
+      for (const communityId of communityIds) {
+        const stillUsed = await tx.select({ id: schema.invites.code })
+          .from(schema.invites).where(eq(schema.invites.communityId, communityId)).limit(1);
+        if (stillUsed.length === 0) {
+          await tx.delete(schema.communities).where(eq(schema.communities.id, communityId));
+        }
+      }
+      // provider_usage is aggregate data with no job_id; do not erase shared quotas.
+      return true;
+    });
   }
 
   async getJob(id: string): Promise<SearchJob | null> {

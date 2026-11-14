@@ -2,21 +2,23 @@ import './globals.css';
 import { Navigation } from '../components/Navigation';
 
 export const metadata = {
-  title: 'Discord Link Hunter | AI-Ready Trading Community Discovery',
-  description: 'Multilingual research and Discord community discovery platform for trading and financial education.',
+  title: 'Link Hunter — Research Intelligence',
+  description: 'A multi-source trading community research workspace with explainable verification and provenance.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className="dark">
-      <body className="min-h-screen bg-slate-950 text-slate-100 antialiased flex flex-col">
+      <body className="min-h-screen flex flex-col antialiased">
         <Navigation />
-        <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">{children}</main>
-        <footer className="border-t border-slate-800/60 py-6 text-center text-xs text-slate-500">
-          Discord Link Hunter v2.1 • Safe Multilingual Discovery Engine
+        <main className="app-workspace flex-1 w-full max-w-[1420px] mx-auto px-4 sm:px-7 xl:px-10 py-8 md:py-11">{children}</main>
+        <footer className="border-t border-[#253243] py-5 px-6">
+          <div className="max-w-[1420px] mx-auto flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#869caf]">
+            <span className="font-medium tracking-[.12em] uppercase">Link Hunter / Research Intelligence</span>
+            <span>Public-source discovery · Evidence-led scoring · v2.1</span>
+          </div>
         </footer>
       </body>
     </html>
   );
 }
-

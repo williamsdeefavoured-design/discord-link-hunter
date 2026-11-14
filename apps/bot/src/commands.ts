@@ -27,7 +27,8 @@ export function buildResultsPageEmbed(
   results: RankedInviteResult[],
   page: number,
   totalPages: number,
-  job?: SearchJob | null
+  job?: SearchJob | null,
+  excludedCount?: number
 ): EmbedBuilder {
   const startIndex = (page - 1) * 5;
   const pageResults = results.slice(startIndex, startIndex + 5);
@@ -40,14 +41,19 @@ export function buildResultsPageEmbed(
     `Job ID: \`${jobId}\`\n` +
     `Found **${results.length}** ranked communities (showing page ${page} of ${totalPages}).`;
 
+  if (excludedCount && excludedCount > 0) {
+    description += `\n⚠️ *${excludedCount} invalid or expired invitation${excludedCount > 1 ? 's were' : ' was'} excluded from recommendations.*`;
+  }
+
   if (job?.languageFilterNotice) {
     description += `\n⚠️ *${job.languageFilterNotice}*`;
   }
 
+  const trimForEmbed = (value: string, length: number) => value.length <= length ? value : value.slice(0, length - 1) + '…';
   const embed = new EmbedBuilder()
     .setColor(0x5865f2)
-    .setTitle(title)
-    .setDescription(description)
+    .setTitle(trimForEmbed(title, 256))
+    .setDescription(trimForEmbed(description, 4096))
     .setFooter({
       text: `Page ${page} of ${totalPages} • Mode: ${job?.mode || 'live'} • View full details in dashboard`,
     })
@@ -70,11 +76,11 @@ export function buildResultsPageEmbed(
     const sourcesText = sourcePlatforms.length > 0 ? ` | Via: \`${sourcePlatforms.join(', ')}\`` : '';
 
     embed.addFields({
-      name: `#${rank} • Score ${res.score}/100: ${serverName}`,
+      name: trimForEmbed(`#${rank} • Score ${res.score}/100: ${serverName}`, 256),
       value:
         `${link}${members}\n` +
         `Status: \`${res.invite.status}\` | Lang: \`${res.detectedLanguage}\`${sourcesText}\n` +
-        `*${explanations}*`,
+        trimForEmbed(`*${explanations}*`, 900),
     });
   });
 
@@ -85,10 +91,12 @@ export function buildPaginationRow(
   jobId: string,
   page: number,
   totalPages: number,
-  authorId: string
+  authorId: string,
+  statusFilter?: string
 ): ActionRowBuilder<ButtonBuilder> {
+  const statusSuffix = statusFilter && statusFilter !== 'valid' ? `:${statusFilter}` : '';
   const prevButton = new ButtonBuilder()
-    .setCustomId(`page:${jobId}:${page - 1}:${authorId}`)
+    .setCustomId(`page:${jobId}:${page - 1}:${authorId}${statusSuffix}`)
     .setLabel('◀ Previous')
     .setStyle(ButtonStyle.Secondary)
     .setDisabled(page <= 1);
@@ -100,7 +108,7 @@ export function buildPaginationRow(
     .setDisabled(true);
 
   const nextButton = new ButtonBuilder()
-    .setCustomId(`page:${jobId}:${page + 1}:${authorId}`)
+    .setCustomId(`page:${jobId}:${page + 1}:${authorId}${statusSuffix}`)
     .setLabel('Next ▶')
     .setStyle(ButtonStyle.Primary)
     .setDisabled(page >= totalPages);
@@ -125,7 +133,9 @@ export async function handleButtonInteraction(
     return;
   }
 
-  const [, jobId, targetPageStr, authorId] = parts;
+  const [, jobId, targetPageStr, authorId, rawStatus] = parts;
+  const statusFilter = rawStatus || 'valid';
+
   if (!jobId || !targetPageStr) {
     return;
   }
@@ -150,12 +160,10 @@ export async function handleButtonInteraction(
 
   try {
     const repo = getRepository();
-    const [results, job] = await Promise.all([
-      repo.getJobResults(jobId),
-      repo.getJob(jobId),
-    ]);
+    const job = await repo.getJob(jobId);
+    const allResults = job?.results || [];
 
-    if (!job && (!results || results.length === 0)) {
+    if (!job && (!allResults || allResults.length === 0)) {
       await interaction.followUp({
         content: `❌ Search job \`${jobId}\` was not found.`,
         ephemeral: true,
@@ -163,7 +171,7 @@ export async function handleButtonInteraction(
       return;
     }
 
-    if (!results || results.length === 0) {
+    if (!allResults || allResults.length === 0) {
       await interaction.followUp({
         content: `❌ No results stored for job \`${jobId}\`.`,
         ephemeral: true,
@@ -171,11 +179,22 @@ export async function handleButtonInteraction(
       return;
     }
 
-    const totalPages = Math.ceil(results.length / 5) || 1;
+    // Filter results according to active status filter
+    let displayResults = allResults;
+    let excludedCount = 0;
+    if (statusFilter === 'valid') {
+      displayResults = allResults.filter((r) => r.invite.status === 'valid');
+      excludedCount = allResults.length - displayResults.length;
+    } else if (statusFilter === 'expired_or_revoked') {
+      displayResults = allResults.filter((r) => r.invite.status !== 'valid');
+      excludedCount = allResults.length - displayResults.length;
+    }
+
+    const totalPages = Math.ceil(displayResults.length / 5) || 1;
     const page = Math.max(1, Math.min(targetPage, totalPages));
 
-    const embed = buildResultsPageEmbed(jobId, results, page, totalPages, job);
-    const row = buildPaginationRow(jobId, page, totalPages, authorId);
+    const embed = buildResultsPageEmbed(jobId, displayResults, page, totalPages, job, excludedCount);
+    const row = buildPaginationRow(jobId, page, totalPages, authorId, statusFilter);
 
     // After deferUpdate(), update the message via editReply()
     await interaction.editReply({
@@ -239,43 +258,9 @@ export const slashCommands = [
         .setName('limit')
         .setDescription('Max number of invites to find (1-20)')
         .setRequired(false)
-    )
-    .addStringOption((opt) =>
-      opt
-        .setName('mode')
-        .setDescription('Use Mock for testing or Live for real research API requests')
-        .setRequired(false)
-        .addChoices(
-          { name: 'Mock (no research API credits)', value: 'mock' },
-          { name: 'Live (uses research API credits)', value: 'live' }
-        )
     ),
 
-  new SlashCommandBuilder()
-    .setName('deepsearch')
-    .setDescription('Deep search exploration for hidden trading communities (Depth 2)')
-    .addStringOption((opt) =>
-      opt
-        .setName('topic')
-        .setDescription('Trading topic')
-        .setRequired(true)
-    )
-    .addStringOption((opt) =>
-      opt
-        .setName('language')
-        .setDescription('Target language')
-        .setRequired(false)
-    )
-    .addStringOption((opt) =>
-      opt
-        .setName('mode')
-        .setDescription('Use Mock for testing or Live for real research API requests')
-        .setRequired(false)
-        .addChoices(
-          { name: 'Mock (no research API credits)', value: 'mock' },
-          { name: 'Live (uses research API credits)', value: 'live' }
-        )
-    ),
+  // Depth 2 remains available internally, but is hidden from guild slash commands.
 
   new SlashCommandBuilder()
     .setName('verify')
@@ -295,6 +280,17 @@ export const slashCommands = [
         .setName('job')
         .setDescription('Job ID')
         .setRequired(true)
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName('status')
+        .setDescription('Filter by invite status (default: valid active only)')
+        .setRequired(false)
+        .addChoices(
+          { name: 'Valid active communities (default)', value: 'valid' },
+          { name: 'All communities (including expired/revoked)', value: 'all' },
+          { name: 'Expired or revoked only', value: 'expired_or_revoked' }
+        )
     ),
 
   new SlashCommandBuilder()
@@ -336,8 +332,6 @@ export async function handleInteraction(
   interaction: ChatInputCommandInteraction
 ) {
   const config = getConfig();
-  const repo = getRepository();
-  const queue = new JobQueueManager(repo);
 
   // Check user authorization if restricted
   if (config.ALLOWED_DISCORD_USER_IDS.length > 0) {
@@ -366,12 +360,12 @@ export async function handleInteraction(
         },
         {
           name: 'Default Search Mode',
-          value: `\`${config.SEARCH_MODE}\``,
+          value: `\`live\``,
           inline: true,
         },
         {
           name: 'Database',
-          value: repo.isMock ? 'Mock / In-Memory' : 'Supabase Postgres',
+          value: config.DATABASE_URL || config.DIRECT_URL ? 'PostgreSQL configured' : 'Local storage',
           inline: true,
         },
         {
@@ -407,7 +401,11 @@ export async function handleInteraction(
     return;
   }
 
-  // VERIFY
+  // Repository creation is deferred until after fast commands have returned.
+  const repo = getRepository();
+  const queue = new JobQueueManager(repo);
+
+  // VERIFY does not require a database query. Keep acknowledgement prompt.
   if (commandName === 'verify') {
     await interaction.deferReply();
 
@@ -498,11 +496,8 @@ export async function handleInteraction(
 
     const depth = commandName === 'deepsearch' ? 2 : 1;
 
-    // Explicit per-command mode.
-    // Mock is the safe default.
-    const mode = (
-      interaction.options.getString('mode') || 'mock'
-    ) as 'mock' | 'live';
+    // User-facing searches are always Live; test fixtures remain in Vitest.
+    const mode = 'live' as const;
 
     // Create job using the selected mode
     const job = await queue.createJob(
@@ -538,8 +533,17 @@ export async function handleInteraction(
       return;
     }
 
-    if (finishedJob.results.length === 0) {
-      let content = `🎯 **Hunt Completed for ${topic.toUpperCase()} (${language.toUpperCase()})**\nJob ID: \`${job.id}\`\nNo communities matched all strict topic and language criteria.`;
+    // Default main community results to active, valid invitations
+    const allResults = finishedJob.results;
+    const validResults = allResults.filter((r) => r.invite.status === 'valid');
+    const excludedCount = allResults.length - validResults.length;
+    const displayResults = validResults;
+
+    if (displayResults.length === 0) {
+      let content = `🎯 **Hunt Completed for ${topic.toUpperCase()} (${language.toUpperCase()})**\nJob ID: \`${job.id}\`\nNo active valid communities matched all strict criteria.`;
+      if (excludedCount > 0) {
+        content += `\n⚠️ *${excludedCount} invalid or expired invitation${excludedCount > 1 ? 's were' : ' was'} excluded from recommendations.*`;
+      }
       if (finishedJob.languageFilterNotice) {
         content += `\n⚠️ *${finishedJob.languageFilterNotice}*`;
       }
@@ -547,18 +551,19 @@ export async function handleInteraction(
       return;
     }
 
-    const totalResults = finishedJob.results.length;
+    const totalResults = displayResults.length;
     const totalPages = Math.ceil(totalResults / 5) || 1;
     const embed = buildResultsPageEmbed(
       job.id,
-      finishedJob.results,
+      displayResults,
       1,
       totalPages,
-      finishedJob
+      finishedJob,
+      excludedCount
     );
     const components =
       totalPages > 1
-        ? [buildPaginationRow(job.id, 1, totalPages, interaction.user.id)]
+        ? [buildPaginationRow(job.id, 1, totalPages, interaction.user.id, 'valid')]
         : [];
 
     await interaction.followUp({ embeds: [embed], components });
@@ -644,10 +649,13 @@ export async function handleInteraction(
     await interaction.deferReply();
 
     const jobId = interaction.options.getString('job', true);
-    const [results, job] = await Promise.all([
-      repo.getJobResults(jobId),
-      repo.getJob(jobId),
-    ]);
+    const statusOption = interaction.options.getString('status') || 'valid';
+    const job = await repo.getJob(jobId);
+    if (!job) {
+      await interaction.editReply({ content: '❌ Job not found or permanently deleted: ' + jobId });
+      return;
+    }
+    const results = job.results || [];
 
     if (results.length === 0) {
       let content = `No results stored for job \`${jobId}\` yet.`;
@@ -660,12 +668,37 @@ export async function handleInteraction(
       return;
     }
 
-    const totalResults = results.length;
+    // Filter results by status (default: valid active only)
+    let displayResults = results;
+    let excludedCount = 0;
+    if (statusOption === 'valid') {
+      displayResults = results.filter((r) => r.invite.status === 'valid');
+      excludedCount = results.length - displayResults.length;
+    } else if (statusOption === 'expired_or_revoked') {
+      displayResults = results.filter((r) => r.invite.status !== 'valid');
+      excludedCount = results.length - displayResults.length;
+    }
+
+    if (displayResults.length === 0) {
+      let content = `No communities with status \`${statusOption}\` stored for job \`${jobId}\`.`;
+      if (excludedCount > 0) {
+        content += `\n⚠️ *${excludedCount} invitation${excludedCount > 1 ? 's were' : ' was'} excluded by status filter.*`;
+      }
+      if (job?.languageFilterNotice) {
+        content += `\n⚠️ ${job.languageFilterNotice}`;
+      }
+      await interaction.editReply({
+        content,
+      });
+      return;
+    }
+
+    const totalResults = displayResults.length;
     const totalPages = Math.ceil(totalResults / 5) || 1;
-    const embed = buildResultsPageEmbed(jobId, results, 1, totalPages, job);
+    const embed = buildResultsPageEmbed(jobId, displayResults, 1, totalPages, job, excludedCount);
     const components =
       totalPages > 1
-        ? [buildPaginationRow(jobId, 1, totalPages, interaction.user.id)]
+        ? [buildPaginationRow(jobId, 1, totalPages, interaction.user.id, statusOption)]
         : [];
 
     await interaction.editReply({ embeds: [embed], components });

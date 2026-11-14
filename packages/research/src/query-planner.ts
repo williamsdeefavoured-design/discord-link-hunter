@@ -75,38 +75,51 @@ export class QueryPlanner {
       });
     }
 
-    // Distribute queries across languages, topics, and source targets
+    // Distribute across targets and synonyms without spending the entire query
+    // budget on the first phrase. Native terms + widely-used market terminology
+    // improve recall for mixed-language trading communities.
+    const globalTopicTerm: Partial<Record<TradingTopic, string>> = {
+      forex: 'forex', xauusd: 'xauusd', stocks: 'stocks', crypto: 'crypto',
+      futures: 'futures', options: 'options', indices: 'indices',
+      day_trading: 'day trading', swing_trading: 'swing trading',
+      investing: 'investing', technical_analysis: 'technical analysis',
+      education: 'trading education',
+    };
+
     for (const lang of languages) {
       for (const topic of topics) {
-        const synonyms = getSynonymsForTopic(topic, lang);
-        // Use up to 4 synonyms per topic
-        const topSynonyms = synonyms.slice(0, 4);
+        const localized = getSynonymsForTopic(topic, lang);
+        const variants = Array.from(new Set([
+          localized[0], globalTopicTerm[topic], ...localized.slice(1, 4),
+        ].filter((value): value is string => Boolean(value))));
 
-        for (const synonym of topSynonyms) {
-          for (const target of targetsToUse) {
-            if (planned.length >= this.maxQueries) break;
-
-            const query =
-              target.operator === null
-                ? `"${synonym}" "discord.gg/"`
-                : `${target.operator} "${synonym}" "discord.gg/"`;
-
-            if (!seenQueries.has(query)) {
-              seenQueries.add(query);
-              planned.push({
-                query,
-                topic,
-                language: lang,
-                priority: planned.length + 1,
-                platform: target.platform,
-              });
-            }
+        // Each pass visits EVERY source category, with a different search term.
+        // A 4-query job therefore covers all 4 broad source groups and no more.
+        for (let round = 0; round < variants.length; round++) {
+          for (let targetIndex = 0; targetIndex < targetsToUse.length; targetIndex++) {
+            if (planned.length >= this.maxQueries) return planned;
+            const target = targetsToUse[targetIndex];
+            const synonym = variants[(round + targetIndex) % variants.length];
+            // Public posts often say "Discord" without printing the invite in
+            // indexed text; don't require "discord.gg/" for every platform.
+            const discordTerm = target.operator === null || targetIndex === 1
+              ? '"discord.gg/"'
+              : '"discord"';
+            const query = target.operator === null
+              ? `"${synonym}" ${discordTerm}`
+              : `${target.operator} "${synonym}" ${discordTerm}`;
+            if (seenQueries.has(query)) continue;
+            seenQueries.add(query);
+            planned.push({
+              query,
+              topic,
+              language: lang,
+              priority: planned.length + 1,
+              platform: target.platform,
+            });
           }
-          if (planned.length >= this.maxQueries) break;
         }
-        if (planned.length >= this.maxQueries) break;
       }
-      if (planned.length >= this.maxQueries) break;
     }
 
     return planned;

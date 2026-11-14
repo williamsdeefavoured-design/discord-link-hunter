@@ -66,7 +66,7 @@ export const LANGUAGE_TRADING_DICTIONARIES: Record<LanguageCode, Record<TradingT
   },
   fr: {
     forex: ['marché des changes', 'signaux forex', 'devises', 'forex'],
-    xauusd: ['trading or', 'cours de l or', 'analyse or', 'xauusd', 'or', 'xau', 'signaux or'],
+    xauusd: ['trading or', 'cours de l or', 'analyse or', 'xauusd', 'xau', 'signaux or'],
     stocks: ['actions', 'bourse', 'marché boursier', 'marche boursier', 'actions paris'],
     crypto: ['cryptomonnaies', 'crypto', 'bitcoin', 'altcoins'],
     futures: ['contrats à terme', 'trading futures'],
@@ -214,13 +214,15 @@ export function hasGeneralTradingContext(text: string): boolean {
   return GENERAL_TRADING_TERMS.some((term) => hasPhrase(normalized, term));
 }
 
+// Distinguishing phrases rather than generic trading terms (traders, signals,
+// server, group) which occur in communities of many languages.
 const LANGUAGE_HINTS: Record<LanguageCode, string[]> = {
-  en: ['welcome', 'join us', 'we are', 'learn trading', 'community', 'official', 'chat', 'discussion', 'daily analysis', 'financial', 'traders club', 'the', 'and', 'for', 'with', 'join', 'server', 'traders', 'group', 'free', 'alerts', 'signals', 'daily', 'news', 'pros', 'club'],
-  de: ['deutsch', 'deutsche', 'deutscher', 'deutschland', 'der', 'die', 'das', 'und', 'für', 'aktien', 'börse', 'wertpapiere', 'devisenhandel', 'investieren', 'gemeinschaft', 'anleger', 'finanzen', 'handel'],
-  es: ['español', 'española', 'bienvenidos', 'comunidad', 'servidor', 'para', 'acciones', 'señales', 'futuros', 'inversión', 'análisis', 'divisas', 'bolsa de valores', 'renta variable', 'inversores', 'mercado bursátil', 'españa', 'latam'],
-  pt: ['português', 'portugues', 'brasileiro', 'brasil', 'bem-vindos', 'comunidade', 'ações', 'opções', 'investimentos', 'sinais', 'câmbio', 'ibovespa', 'mercado financeiro', 'investidores', 'renda variável'],
-  fr: ['français', 'française', 'bienvenue', 'communauté', 'serveur', 'bourse', 'signaux', 'investissement', 'cryptomonnaies', 'marché', 'devises', 'investisseurs', 'france', 'cac 40'],
-  ar: ['العربية', 'عربي', 'تداول', 'الأسهم', 'عملات', 'الذهب', 'استثمار', 'مجتمع', 'سيرفر', 'توصيات', 'مستثمرين', 'البورصة'],
+  en: ['welcome to', 'join us', 'we are', 'our community', 'english speaking', 'learn trading', 'stock market', 'official', 'community', 'and', 'with', 'for', 'our', 'strategies', 'probability', 'published', 'daily'],
+  de: ['deutschsprachig', 'deutschsprachige', 'deutscher', 'deutschland', 'börse', 'devisenhandel', 'wertpapiere', 'gemeinschaft', 'für anfänger'],
+  es: ['español', 'española', 'bienvenidos', 'comunidad', 'mercado de divisas', 'señales', 'análisis', 'inversores', 'mercado bursátil'],
+  pt: ['português', 'portugues', 'brasileiro', 'brasil', 'bem vindos', 'comunidade', 'ações', 'opções', 'investimentos', 'câmbio', 'ibovespa'],
+  fr: ['français', 'française', 'bienvenue', 'communauté', 'marché des changes', 'signaux', 'investisseurs', 'investissement', 'devises'],
+  ar: ['العربية', 'عربي', 'تداول', 'الأسهم', 'الذهب', 'استثمار', 'مجتمع', 'توصيات', 'مستثمرين'],
 };
 
 // Precompute terms that belong to only one language across all dictionaries.
@@ -265,14 +267,17 @@ export function detectLanguageEvidence(text: string): LanguageEvidence {
 
   const normalized = normalizeText(text);
   const scores = {} as Record<LanguageCode, number>;
+  // Never treat two-letter language codes inside ordinary text as proof of language.
+  // E.g. "de" is also a Spanish/French word, "es" is a Spanish verb.
   const explicitLabels: Record<LanguageCode, string[]> = {
-    en: ['english', 'en', 'usa', 'uk'],
-    de: ['deutsch', 'german', 'de', 'germany', 'österreich', 'schweiz'],
-    es: ['español', 'spanish', 'es', 'spain', 'españa', 'latinoamérica', 'latam'],
-    pt: ['português', 'portuguese', 'pt', 'brasil', 'brazil', 'portugal'],
-    fr: ['français', 'french', 'fr', 'france'],
-    ar: ['arabic', 'ar', 'عربي', 'عرب'],
+    en: ['english', 'english speaking'],
+    de: ['deutsch', 'german', 'deutschsprachig', 'germany', 'österreich'],
+    es: ['español', 'spanish', 'españa', 'latinoamérica'],
+    pt: ['português', 'portuguese', 'brasil', 'brazil', 'portugal'],
+    fr: ['français', 'french', 'france'],
+    ar: ['arabic', 'عربي', 'العربية'],
   };
+
   for (const language of Object.keys(LANGUAGE_TRADING_DICTIONARIES) as LanguageCode[]) {
     const distinctHints = new Set(LANGUAGE_HINTS[language].map((term) => normalizeText(term).trim()));
     const distinctTerms = new Set(LANGUAGE_SPECIFIC_TERMS[language]);

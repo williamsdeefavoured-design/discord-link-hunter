@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { ScoreBreakdown } from '@discord-link-hunter/core';
 import { Info } from 'lucide-react';
 
@@ -10,64 +10,50 @@ interface ScoreBadgeProps {
 }
 
 export function ScoreBadge({ score, breakdown }: ScoreBadgeProps) {
-  const [showTooltip, setShowTooltip] = useState(false);
-
-  let colorClasses = 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
-  if (score < 50) {
-    colorClasses = 'bg-rose-500/10 text-rose-400 border-rose-500/20';
-  } else if (score < 75) {
-    colorClasses = 'bg-amber-500/10 text-amber-400 border-amber-500/20';
-  }
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  const tone = score >= 75 ? 'text-[#75cdb5]' : score >= 50 ? 'text-[#d9b478]' : 'text-[#d49e9e]';
 
   return (
-    <div className="relative inline-block">
-      <div
-        className={`inline-flex items-center space-x-1 px-2.5 py-1 rounded-full text-xs font-semibold border cursor-pointer ${colorClasses}`}
-        onMouseEnter={() => setShowTooltip(true)}
-        onMouseLeave={() => setShowTooltip(false)}
-        onClick={() => setShowTooltip(!showTooltip)}
+    <div className="relative inline-flex">
+      <button
+        type="button"
+        aria-label={`Relevance score ${score} out of 100${breakdown ? '. Show score details' : ''}`}
+        aria-expanded={breakdown ? open : undefined}
+        aria-describedby={breakdown && open ? id : undefined}
+        className={`inline-flex items-center gap-1.5 rounded-md border border-[#324253] bg-[#182532] px-2.5 py-1 font-mono text-[11px] font-bold tabular-nums ${tone} hover:border-[#58778a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#8ac1ca]`}
+        onMouseEnter={() => breakdown && setOpen(true)}
+        onMouseLeave={() => setOpen(false)}
+        onFocus={() => breakdown && setOpen(true)}
+        onBlur={() => setOpen(false)}
+        onClick={() => breakdown && setOpen((value) => !value)}
       >
-        <span>{score}/100</span>
-        <Info className="w-3 h-3 opacity-60" />
-      </div>
+        <span>{score}<span className="text-[#718b9d] font-normal"> / 100</span></span>
+        {breakdown && <Info className="h-3 w-3 opacity-65" aria-hidden="true" />}
+      </button>
 
-      {showTooltip && breakdown && (
-        <div className="absolute z-50 bottom-full mb-2 left-1/2 -translate-x-1/2 w-72 p-3 bg-slate-900 border border-slate-700 rounded-lg shadow-xl text-xs text-slate-300">
-          <div className="font-semibold text-white mb-1.5 pb-1 border-b border-slate-800 flex justify-between">
-            <span>Score Breakdown</span>
-            <span className="text-indigo-400">{score}/100</span>
+      {breakdown && open && (
+        <div id={id} role="tooltip" className="absolute z-50 bottom-full mb-2 left-0 w-[272px] max-w-[85vw] rounded-lg border border-[#345062] bg-[#101c29] p-3.5 shadow-[0_14px_45px_#0008] text-xs text-[#b6c9d7]">
+          <div className="flex items-center justify-between pb-2 mb-2 border-b border-[#304154]">
+            <span className="font-semibold text-[#edf4f7]">Evidence breakdown</span><span className="font-mono text-[#9dcbd3]">{score} / 100</span>
           </div>
-          <div className="space-y-1">
-            <div className="flex justify-between">
-              <span>Relevance:</span>
-              <span className="font-mono text-slate-200">+{breakdown.topicRelevance}/35</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Invite Active:</span>
-              <span className="font-mono text-slate-200">+{breakdown.inviteValidity}/20</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Language:</span>
-              <span className="font-mono text-slate-200">+{breakdown.languageMatch}/15</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Provenance:</span>
-              <span className="font-mono text-slate-200">+{breakdown.sourceCredibility}/10</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Freshness:</span>
-              <span className="font-mono text-slate-200">+{breakdown.freshness}/10</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Verified Size:</span>
-              <span className="font-mono text-slate-200">+{breakdown.activitySignal}/10</span>
-            </div>
+          <div className="space-y-1.5">
+            {[
+              ['Topic relevance', breakdown.topicRelevance, 35],
+              ['Invite status', breakdown.inviteValidity, 20],
+              ['Language', breakdown.languageMatch, 15],
+              ['Provenance', breakdown.sourceCredibility, 10],
+              ['Freshness', breakdown.freshness, 10],
+              ['Community size', breakdown.activitySignal, 10],
+            ].map(([name, value, max]) => (
+              <div className="flex justify-between gap-2" key={name}>
+                <span>{name}</span><span className="text-[#e8eff4] font-mono">{value} / {max}</span>
+              </div>
+            ))}
           </div>
-          {breakdown.explanations && breakdown.explanations.length > 0 && (
-            <div className="mt-2 pt-1.5 border-t border-slate-800 text-[11px] text-slate-400 space-y-0.5">
-              {breakdown.explanations.slice(0, 3).map((exp, i) => (
-                <div key={i}>• {exp}</div>
-              ))}
+          {breakdown.explanations?.length > 0 && (
+            <div className="mt-3 pt-2 border-t border-[#304154] text-[11px] text-[#91acbb] space-y-1">
+              {breakdown.explanations.slice(0, 3).map((explanation, index) => <div key={index}>{explanation}</div>)}
             </div>
           )}
         </div>
@@ -75,4 +61,3 @@ export function ScoreBadge({ score, breakdown }: ScoreBadgeProps) {
     </div>
   );
 }
-

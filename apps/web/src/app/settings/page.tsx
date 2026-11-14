@@ -35,7 +35,8 @@ export default function SettingsPage() {
     <div className="max-w-4xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white flex items-center space-x-2">
+          <div className="workspace-kicker mb-2">04 / SYSTEM DIAGNOSTICS</div>
+            <h1 className="text-2xl md:text-3xl font-semibold text-white tracking-[-0.04em] flex items-center space-x-2">
             <Settings className="w-6 h-6 text-indigo-400" />
             <span>Settings & System Health</span>
           </h1>

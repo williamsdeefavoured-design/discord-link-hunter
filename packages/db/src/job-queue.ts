@@ -18,14 +18,26 @@ import { getRepository, LinkHunterRepository } from './repositories.js';
 
 export class JobQueueManager {
   private repo: LinkHunterRepository;
+  private static activeJobs = new Map<string, Promise<SearchJob>>();
 
   constructor(repo?: LinkHunterRepository) {
     this.repo = repo || getRepository();
   }
 
+  /**
+   * Returns whether a job is currently active in memory.
+   */
+  static isJobActive(jobId: string): boolean {
+    return JobQueueManager.activeJobs.has(jobId);
+  }
+
   async createJob(params: SearchJobParams, ownerId?: string, forceMode?: 'mock' | 'live'): Promise<SearchJob> {
     const config = getConfig();
-    const mode = forceMode || (config.SEARCH_MODE === 'live' ? 'live' : 'mock');
+    const automatedTest = process.env.NODE_ENV === 'test' || process.env.VITEST === 'true';
+    if (!automatedTest && forceMode === 'mock') {
+      throw new Error('Simulated discoveries are disabled outside automated tests.');
+    }
+    const mode: 'mock' | 'live' = automatedTest ? (forceMode ?? 'mock') : 'live';
 
     const job: SearchJob = {
       id: `job-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
@@ -60,13 +72,36 @@ export class JobQueueManager {
   }
 
   async processJob(jobId: string): Promise<SearchJob> {
+    // If job is already executing in this process, return existing promise to avoid duplicate execution
+    const inFlight = JobQueueManager.activeJobs.get(jobId);
+    if (inFlight) {
+      return inFlight;
+    }
+
     const job = await this.repo.getJob(jobId);
     if (!job) throw new Error(`Job ${jobId} not found`);
 
-    if (job.status === 'cancelled') {
+    // Preserve previously completed, dry-run, and cancelled jobs
+    if (
+      job.status === 'completed' ||
+      job.status === 'dry_run_plan' ||
+      job.status === 'cancelled'
+    ) {
       return job;
     }
 
+    const executionPromise = this.executeJobInternal(job);
+    JobQueueManager.activeJobs.set(jobId, executionPromise);
+
+    try {
+      return await executionPromise;
+    } finally {
+      JobQueueManager.activeJobs.delete(jobId);
+    }
+  }
+
+  private async executeJobInternal(job: SearchJob): Promise<SearchJob> {
+    const jobId = job.id;
     const config = getConfig();
     const startTime = new Date().toISOString();
     job.status = 'running';
@@ -207,6 +242,57 @@ export class JobQueueManager {
     job.completedAt = new Date().toISOString();
     await this.repo.saveJob(job);
     return true;
+  }
+
+  /**
+   * Detects and recovers jobs left in 'running' state after an unexpected server crash or process termination.
+   *
+   * Rules:
+   * - Ignores active in-flight jobs in current process memory (`JobQueueManager.activeJobs`).
+   * - Preserves completed, dry_run_plan, cancelled, and failed jobs.
+   * - Marks abandoned 'running' jobs as 'failed' with explicit explanatory details.
+   */
+  async recoverAbandonedJobs(options?: {
+    olderThanMs?: number;
+  }): Promise<{ recoveredCount: number; jobIds: string[] }> {
+    const jobs = await this.repo.listJobs(100);
+    const now = Date.now();
+    const olderThanMs = options?.olderThanMs ?? 0;
+    const recoveredJobIds: string[] = [];
+
+    for (const job of jobs) {
+      // Do not fail active in-flight jobs
+      if (JobQueueManager.activeJobs.has(job.id)) {
+        continue;
+      }
+
+      // Preserve previously completed, dry-run, and finished jobs
+      if (
+        job.status === 'completed' ||
+        job.status === 'dry_run_plan' ||
+        job.status === 'cancelled' ||
+        job.status === 'failed'
+      ) {
+        continue;
+      }
+
+      if (job.status === 'running') {
+        const referenceTime = job.startedAt
+          ? new Date(job.startedAt).getTime()
+          : new Date(job.createdAt).getTime();
+
+        if (now - referenceTime >= olderThanMs) {
+          job.status = 'failed';
+          job.errorDetails =
+            'Job was interrupted by an unexpected server restart or process termination before completion.';
+          job.completedAt = new Date().toISOString();
+          await this.repo.saveJob(job);
+          recoveredJobIds.push(job.id);
+        }
+      }
+    }
+
+    return { recoveredCount: recoveredJobIds.length, jobIds: recoveredJobIds };
   }
 }
 

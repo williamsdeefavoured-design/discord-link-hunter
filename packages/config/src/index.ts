@@ -58,6 +58,7 @@ export const ConfigSchema = z.object({
   // Server & Web
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   API_PORT: z.coerce.number().default(3001),
+  API_SECRET_KEY: z.string().optional().default(''),
   WEB_ORIGIN: z.string().default('http://localhost:3000'),
   NEXT_PUBLIC_API_BASE_URL: z.string().default('http://localhost:3001'),
 
@@ -81,7 +82,10 @@ export function getConfig(): AppConfig {
       const issues = parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(', ');
       throw new Error(`Environment validation failed: ${issues}`);
     }
-    _config = parsed.data;
+    // Keep the mock adapter for automated tests only.
+    // A stale SEARCH_MODE=mock in .env cannot enable simulated discoveries in normal use.
+    const automatedTest = process.env.NODE_ENV === 'test' || process.env.VITEST === 'true';
+    _config = automatedTest ? parsed.data : { ...parsed.data, SEARCH_MODE: 'live' };
   }
   return _config;
 }
@@ -116,5 +120,34 @@ export function getRedactedConfigSummary() {
       dailyProviderCap: cfg.SEARCH_DAILY_PROVIDER_REQUEST_CAP,
     },
   };
+}
+
+export function getValidApiKeys(): string[] {
+  const cfg = getConfig();
+  const keys: string[] = [];
+  // The API uses a dedicated secret. Supabase publishable keys are public
+  // identifiers and MUST NOT grant access to paid search execution.
+  if (cfg.API_SECRET_KEY) keys.push(cfg.API_SECRET_KEY);
+
+  // Preserve the legacy local test key only outside production.
+  if (cfg.NODE_ENV !== 'production') {
+    keys.push('dlh_dev_secret_key');
+  }
+  return keys;
+}
+
+export function getPrimaryApiSecret(): string {
+  const cfg = getConfig();
+  return (
+    cfg.API_SECRET_KEY ||
+    (cfg.NODE_ENV === 'production' ? '' : 'dlh_dev_secret_key')
+  );
+}
+
+export function getAllowedCorsOrigins(): string[] {
+  const cfg = getConfig();
+  const rawOrigins = cfg.WEB_ORIGIN.split(',').map((o) => o.trim()).filter(Boolean);
+  const standard = ['http://localhost:3000', 'http://127.0.0.1:3000'];
+  return Array.from(new Set([...rawOrigins, ...standard]));
 }
 

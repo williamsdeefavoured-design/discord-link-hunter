@@ -31,6 +31,7 @@ describe('Fastify HTTP API Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/jobs',
+      headers: { 'x-api-key': 'dlh_dev_secret_key' },
       payload: {
         topics: ['forex'],
         languages: ['en'],
@@ -49,6 +50,7 @@ describe('Fastify HTTP API Routes', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/results/job-seed-demo-01',
+      headers: { 'x-api-key': 'dlh_dev_secret_key' },
     });
 
     expect(res.statusCode).toBe(200);
@@ -67,6 +69,7 @@ describe('Fastify HTTP API Routes', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/export/job-seed-demo-01?format=csv',
+      headers: { 'x-api-key': 'dlh_dev_secret_key' },
     });
 
     expect(res.statusCode).toBe(200);
@@ -78,6 +81,7 @@ describe('Fastify HTTP API Routes', () => {
     const res = await app.inject({
       method: 'GET',
       url: '/api/export/job-seed-demo-01?format=json',
+      headers: { 'x-api-key': 'dlh_dev_secret_key' },
     });
 
     expect(res.statusCode).toBe(200);
@@ -90,6 +94,7 @@ describe('Fastify HTTP API Routes', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/api/verify',
+      headers: { 'x-api-key': 'dlh_dev_secret_key' },
       payload: { url: 'https://google.com/search?q=not-discord' },
     });
 

@@ -5,6 +5,8 @@ import Link from 'next/link';
 import {
   ListFilter,
   RefreshCw,
+  Trash2,
+  Eye,
   AlertTriangle,
   CheckCircle2,
   Clock,
@@ -20,6 +22,10 @@ import { apiFetch } from '../../lib/api';
 
 export default function JobsPage() {
   const [jobs, setJobs] = useState<SearchJob[]>([]);
+  const [showOldJobs, setShowOldJobs] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<SearchJob | null>(null);
+  const [typedJobId, setTypedJobId] = useState('');
+  const [deleting, setDeleting] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -28,7 +34,7 @@ export default function JobsPage() {
 
   const fetchJobs = async () => {
     try {
-      const result = await apiFetch<{ jobs: SearchJob[] }>('/api/jobs');
+      const result = await apiFetch<{ jobs: SearchJob[] }>('/api/jobs?limit=300');
       if (result.ok && result.data?.jobs) {
         setJobs(result.data.jobs);
         setErrorMessage(null);
@@ -75,6 +81,30 @@ export default function JobsPage() {
       alert(err.message || 'Error executing search');
     } finally {
       setExecutionLoading(false);
+    }
+  };
+
+  const visibleJobs = showOldJobs ? jobs : jobs.filter((job) => job.mode === 'live' && !job.isSimulated);
+
+  const handlePermanentDelete = async () => {
+    if (!deleteTarget || typedJobId !== deleteTarget.id || deleting) return;
+    setDeleting(true);
+    try {
+      const res = await apiFetch<{ deleted: boolean }>(`/api/jobs/${encodeURIComponent(deleteTarget.id)}`, {
+        method: 'DELETE',
+        body: JSON.stringify({ confirm: true, jobId: deleteTarget.id }),
+      });
+      if (!res.ok || !res.data?.deleted) {
+        setErrorMessage(res.error || 'Permanent deletion failed.');
+        return;
+      }
+      setJobs((existing) => existing.filter((job) => job.id !== deleteTarget.id));
+      setErrorMessage(null);
+      setDeleteTarget(null);
+      setTypedJobId('');
+      await fetchJobs();
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -129,7 +159,8 @@ export default function JobsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white flex items-center space-x-2">
+          <div className="workspace-kicker mb-2">02 / EXECUTION LOG</div>
+            <h1 className="text-2xl md:text-3xl font-semibold text-white tracking-[-0.04em] flex items-center space-x-2">
             <ListFilter className="w-6 h-6 text-indigo-400" />
             <span>Search Jobs Execution Monitor</span>
           </h1>
@@ -138,6 +169,11 @@ export default function JobsPage() {
           </p>
         </div>
 
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 text-xs text-slate-400 cursor-pointer select-none">
+            <input type="checkbox" checked={showOldJobs} onChange={(e) => setShowOldJobs(e.target.checked)} className="accent-teal-400" />
+            <Eye className="w-3.5 h-3.5" /> Show old test jobs
+          </label>
         <button
           onClick={() => {
             setRefreshing(true);
@@ -148,6 +184,7 @@ export default function JobsPage() {
         >
           <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
         </button>
+        </div>
       </div>
 
       {errorMessage && (
@@ -158,7 +195,7 @@ export default function JobsPage() {
 
       {loading ? (
         <div className="p-12 text-center text-slate-500 text-sm">Loading jobs...</div>
-      ) : jobs.length === 0 ? (
+      ) : visibleJobs.length === 0 ? (
         <div className="p-12 text-center rounded-xl border border-slate-800 bg-slate-900/30 text-slate-400 space-y-3">
           <p>No search jobs recorded yet.</p>
           <Link
@@ -171,7 +208,7 @@ export default function JobsPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          {jobs.map((job) => {
+          {visibleJobs.map((job) => {
             const pct =
               job.progress.queriesPlanned > 0
                 ? Math.round((job.progress.queriesExecuted / job.progress.queriesPlanned) * 100)
@@ -204,6 +241,16 @@ export default function JobsPage() {
                         className="text-xs text-rose-400 hover:underline"
                       >
                         Cancel
+                      </button>
+                    )}
+                    {job.status !== 'running' && job.status !== 'queued' && (
+                      <button
+                        type="button"
+                        onClick={() => { setDeleteTarget(job); setTypedJobId(''); }}
+                        className="inline-flex items-center gap-1 text-xs font-medium text-rose-400 hover:text-rose-300"
+                        title="Permanently delete this job and its unshared data"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" /> Delete
                       </button>
                     )}
                     <Link
@@ -402,6 +449,23 @@ export default function JobsPage() {
                     <span>Confirm & Execute Search</span>
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4" role="presentation">
+          <div role="dialog" aria-modal="true" aria-labelledby="delete-job-heading" className="w-full max-w-md rounded-xl border border-rose-500/30 bg-[#101a25] p-6 shadow-2xl">
+            <h2 id="delete-job-heading" className="text-lg font-semibold text-white">Permanently delete this search job?</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-300">This removes the job, saved results, and unshared associated invite records from Supabase. This cannot be undone.</p>
+            <p className="mt-3 break-all rounded bg-slate-950 px-3 py-2 font-mono text-xs text-cyan-300">{deleteTarget.id}</p>
+            <label className="mt-4 block text-sm text-slate-300" htmlFor="job-delete-confirm">Type the exact job ID to confirm</label>
+            <input id="job-delete-confirm" autoFocus value={typedJobId} onChange={(e) => setTypedJobId(e.target.value)} className="mt-2 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500" placeholder="job-..." />
+            <div className="mt-5 flex justify-end gap-3">
+              <button type="button" disabled={deleting} onClick={() => { setDeleteTarget(null); setTypedJobId(''); }} className="rounded-md border border-slate-600 px-4 py-2 text-sm text-slate-200">Cancel</button>
+              <button type="button" disabled={deleting || typedJobId !== deleteTarget.id} onClick={handlePermanentDelete} className="inline-flex items-center gap-2 rounded-md bg-rose-600 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40">
+                <Trash2 className="w-4 h-4" /> {deleting ? 'Deleting...' : 'Delete permanently'}
               </button>
             </div>
           </div>

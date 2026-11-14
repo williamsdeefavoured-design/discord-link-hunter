@@ -32,13 +32,14 @@ export class SerperAdapter implements SearchProvider {
 
     this.requestCount++;
     const start = Date.now();
-    const limit = Math.min(options.limit || 10, 100);
+    // The community result limit is NOT Serper's per-query Google page size.
+    const limit = Math.max(1, Math.min(options.limit || 10, 10));
 
     const langMap: Record<string, { gl: string; hl: string }> = {
       en: { gl: 'us', hl: 'en' },
       de: { gl: 'de', hl: 'de' },
       es: { gl: 'es', hl: 'es' },
-      pt: { gl: 'br', hl: 'pt-br' },
+      pt: { gl: 'br', hl: 'pt' },
       fr: { gl: 'fr', hl: 'fr' },
       ar: { gl: 'sa', hl: 'ar' },
     };
@@ -97,13 +98,22 @@ export class SerperAdapter implements SearchProvider {
       }
 
       if (!res.ok) {
+        let reason = '';
+        try {
+          const body = typeof res.text === 'function' ? await res.text() : '';
+          const payload = JSON.parse(body);
+          const value = payload?.message ?? payload?.error;
+          reason = typeof value === 'string' ? value.slice(0, 180) : '';
+        } catch {
+          // Provider error body may be unavailable.
+        }
         return {
           provider: 'serper',
           query,
           items: [],
           statusCode,
           durationMs,
-          error: `Serper HTTP error ${statusCode}`,
+          error: `Serper HTTP error ${statusCode}${reason ? `: ${reason}` : ''}`,
         };
       }
 

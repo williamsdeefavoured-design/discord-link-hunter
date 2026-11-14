@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { ShieldCheck, Download, ExternalLink, Filter, Users, Globe2, Tag, ClipboardList, Play, RefreshCw, ArrowRight } from 'lucide-react';
+import { ShieldCheck, Download, ExternalLink, Filter, Users, Globe2, Tag, ClipboardList, Play, RefreshCw, ArrowRight, AlertCircle } from 'lucide-react';
 import { RankedInviteResult } from '@discord-link-hunter/core';
 import { ScoreBadge } from '../../components/ScoreBadge';
 import { apiFetch } from '../../lib/api';
@@ -17,6 +17,9 @@ function ResultsContent() {
   const [jobIsSimulated, setJobIsSimulated] = useState<boolean>(false);
   const [results, setResults] = useState<RankedInviteResult[]>([]);
   const [potentialLeads, setPotentialLeads] = useState<any[]>([]);
+  const [excludedCount, setExcludedCount] = useState<number>(0);
+  const [inactiveCount, setInactiveCount] = useState<number>(0);
+  const [activeStoredCount, setActiveStoredCount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [executing, setExecuting] = useState(false);
@@ -72,14 +75,20 @@ function ResultsContent() {
         const qs = params.toString();
         if (qs) url += `?${qs}`;
 
-        const result = await apiFetch<{ results: RankedInviteResult[]; potentialLeads?: any[] }>(url);
+        const result = await apiFetch<{ results: RankedInviteResult[]; potentialLeads?: any[]; excludedCount?: number; inactiveCount?: number; activeStoredCount?: number }>(url);
         if (result.ok && result.data?.results) {
           setResults(result.data.results);
           setPotentialLeads(result.data.potentialLeads || []);
+          setExcludedCount(result.data.excludedCount || 0);
+          setInactiveCount(result.data.inactiveCount || 0);
+          setActiveStoredCount(result.data.activeStoredCount || 0);
           setErrorMessage(null);
         } else {
           setResults([]);
           setPotentialLeads([]);
+          setExcludedCount(0);
+          setInactiveCount(0);
+          setActiveStoredCount(0);
           if (!result.ok) {
             setErrorMessage(result.error || 'Failed to load results');
           }
@@ -121,7 +130,8 @@ function ResultsContent() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center space-x-3">
-            <h1 className="text-2xl font-bold text-white flex items-center space-x-2">
+            <div className="workspace-kicker mb-2">03 / VERIFIED FINDINGS</div>
+            <h1 className="text-2xl md:text-3xl font-semibold text-white tracking-[-0.04em] flex items-center space-x-2">
               <ShieldCheck className="w-6 h-6 text-indigo-400" />
               <span>Ranked Discord Communities</span>
             </h1>
@@ -175,6 +185,16 @@ function ResultsContent() {
         <div className="p-3.5 rounded-xl border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 text-xs flex items-center space-x-2">
           <Globe2 className="w-4 h-4 shrink-0 text-indigo-400" />
           <span>{job.languageFilterNotice}</span>
+        </div>
+      )}
+
+      {inactiveCount > 0 && statusFilter === 'valid' && (
+        <div className="p-3.5 rounded-lg border border-amber-600/25 bg-amber-600/5 text-amber-200 text-xs flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-amber-400" />
+          <span>
+            {inactiveCount} inactive or unverified invitation{inactiveCount === 1 ? ' is' : 's are'} hidden from active recommendations.{' '}
+            <button type="button" className="underline underline-offset-2 text-[#d7c09c] hover:text-white" onClick={() => setStatusFilter('all')}>Inspect all statuses</button>.
+          </span>
         </div>
       )}
 
@@ -333,8 +353,28 @@ function ResultsContent() {
       {loading ? (
         <div className="p-12 text-center text-slate-500 text-sm">Loading results...</div>
       ) : results.length === 0 ? (
-        <div className="p-12 text-center rounded-xl border border-slate-800 bg-slate-900/30 text-slate-400">
-          No communities match your current filters.
+        <div className="workspace-panel px-6 py-12 md:py-16 text-center space-y-3">
+          <div className="workspace-kicker">No active matches in this view</div>
+          <h2 className="text-xl font-semibold text-[#e6eff5]">No communities meet these conditions.</h2>
+          <p className="max-w-[540px] mx-auto text-sm text-[#9aafc1] leading-relaxed">
+            {activeStoredCount === 0
+              ? 'The research job has no stored active invitations that passed its relevance checks. This is not a connection failure.'
+              : 'Some stored invitations are active, but your current score, language, or platform filters hide them.'}
+          </p>
+          {job?.progress?.validInvitesFound > 0 && (
+            <p className="max-w-[540px] mx-auto text-xs text-[#829aac]">
+              {job.progress.validInvitesFound} invite{job.progress.validInvitesFound === 1 ? ' was' : 's were'} marked valid during discovery, before final relevance and display filters.
+            </p>
+          )}
+          <div className="flex flex-wrap justify-center gap-2 pt-3">
+            {(minScore > 0 || languageFilter !== 'all' || platformFilter !== 'all') && (
+              <button type="button" className="workspace-button workspace-button-secondary" onClick={() => { setMinScore(0); setLanguageFilter('all'); setPlatformFilter('all'); }}>Clear view filters</button>
+            )}
+            {statusFilter !== 'all' && (
+              <button type="button" className="workspace-button workspace-button-secondary" onClick={() => setStatusFilter('all')}>Inspect all statuses</button>
+            )}
+          </div>
+          <p className="text-[11px] text-[#8494a8]">Inactive invitations are diagnostic records, not usable recommendations.</p>
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/30">

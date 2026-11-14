@@ -505,6 +505,7 @@ describe('Public Research Sources & Platform Discovery', () => {
       const resAll = await server.inject({
         method: 'GET',
         url: `/api/results/${testJobId}`,
+        headers: { 'x-api-key': 'dlh_dev_secret_key' },
       });
       expect(resAll.statusCode).toBe(200);
       const dataAll = JSON.parse(resAll.payload);
@@ -514,6 +515,7 @@ describe('Public Research Sources & Platform Discovery', () => {
       const resReddit = await server.inject({
         method: 'GET',
         url: `/api/results/${testJobId}?platform=reddit`,
+        headers: { 'x-api-key': 'dlh_dev_secret_key' },
       });
       expect(resReddit.statusCode).toBe(200);
       const dataReddit = JSON.parse(resReddit.payload);
@@ -524,6 +526,7 @@ describe('Public Research Sources & Platform Discovery', () => {
       const resTv = await server.inject({
         method: 'GET',
         url: `/api/results/${testJobId}?platform=tradingview`,
+        headers: { 'x-api-key': 'dlh_dev_secret_key' },
       });
       expect(resTv.statusCode).toBe(200);
       const dataTv = JSON.parse(resTv.payload);

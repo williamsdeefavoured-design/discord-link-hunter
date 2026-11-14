@@ -9,6 +9,8 @@ import {
   SearchJobProgress,
   VerifiedInvite,
   verifyDiscordInvite,
+  detectTopicsFromText,
+  detectLanguageEvidence,
 } from '@discord-link-hunter/core';
 import { QueryPlanner } from './query-planner.js';
 import { QueryPlanItem, SearchProvider } from './types.js';
@@ -154,6 +156,17 @@ export class SearchOrchestrator {
               });
             }
 
+            if (!searchResult) {
+              progress.queriesFailed++;
+              progress.providerErrors.push({
+                provider: this.primaryProvider.name,
+                error: 'No research provider was available to execute this query',
+                timestamp: new Date().toISOString(),
+              });
+              if (onProgress) onProgress({ ...progress });
+              return;
+            }
+
             if (searchResult.error || searchResult.statusCode !== 200) {
               progress.queriesFailed++;
               progress.providerErrors.push({
@@ -276,7 +289,27 @@ export class SearchOrchestrator {
     const verifiedList: { invite: VerifiedInvite; sources: DiscoveredInvite[] }[] = [];
     const entries = Array.from(discoveredInvitesMap.entries());
 
-    // Bound invite verifications
+    // Prioritize relevant public evidence BEFORE making Discord verification
+    // requests. The previous insertion-order slice could spend the whole
+    // verification budget on English/unrelated invites discovered first.
+    // Source snippets are imperfect signals, never proof of a server match.
+    function candidatePriority(sources: DiscoveredInvite[]): number {
+      const snippets = sources.map((source) => source.contextSnippet || '').join(' ');
+      const topics = detectTopicsFromText(snippets);
+      const language = detectLanguageEvidence(snippets);
+      const topicMatch = params.topics.length === 0 ||
+        params.topics.some((topic) => topics.includes(topic));
+      const languageMatch = params.languages.length === 0 ||
+        (language.language !== null && params.languages.includes(language.language));
+      const domains = new Set(sources.map((source) => source.sourceDomain).filter(Boolean));
+      return (topicMatch ? 5 : 0) + (languageMatch ? 6 : 0) +
+        (languageMatch && language.confidence === 'high' ? 3 : 0) +
+        Math.min(2, domains.size);
+    }
+    entries.sort((a, b) => candidatePriority(b[1]) - candidatePriority(a[1]));
+
+    // Keep the existing bounded Discord verification budget; use it smarter,
+    // without increasing paid search-provider queries or verification load.
     const targetCodes = entries.slice(0, Math.min(params.limit * 2, entries.length));
 
     for (const [code, sources] of targetCodes) {
@@ -343,7 +376,10 @@ export class SearchOrchestrator {
 
     if (hasTopics || hasLanguages) {
       const validVerifiedCount = verifiedList.filter((v) => v.invite.status === 'valid').length;
-      const excludedCount = Math.max(0, validVerifiedCount - finalResults.length);
+      const validMatchingCount = finalResults.filter((r) => r.invite.status === 'valid').length;
+      const totalEligibleValidCount = ranked.filter((r) => r.invite.status === 'valid').length;
+      // Exclusion only means failed relevance, not omitted due to the result limit.
+      const excludedCount = Math.max(0, validVerifiedCount - totalEligibleValidCount);
       progress.languageFilteredOutCount = excludedCount;
 
       if (finalResults.length < params.limit && excludedCount > 0) {
@@ -351,11 +387,11 @@ export class SearchOrchestrator {
         const langLabel = hasLanguages ? params.languages.map((l) => l.toUpperCase()).join(', ') : null;
 
         if (topicLabel && langLabel) {
-          languageFilterNotice = `Strict relevance filter active [Topic: ${topicLabel}, Lang: ${langLabel}]: Found ${finalResults.length} matching communities. ${excludedCount} verified communities were excluded because they lacked credible evidence matching the requested trading topic or language.`;
+          languageFilterNotice = `Strict relevance filter active [Topic: ${topicLabel}, Lang: ${langLabel}]: Found ${validMatchingCount} active matching communities. ${excludedCount} verified communities were excluded because they lacked credible evidence matching the requested trading topic or language.`;
         } else if (topicLabel) {
-          languageFilterNotice = `Strict topic filter active [${topicLabel}]: Found ${finalResults.length} matching communities. ${excludedCount} verified communities were excluded because they lacked credible evidence matching the requested trading topic.`;
+          languageFilterNotice = `Strict topic filter active [${topicLabel}]: Found ${validMatchingCount} active matching communities. ${excludedCount} verified communities were excluded because they lacked credible evidence matching the requested trading topic.`;
         } else if (langLabel) {
-          languageFilterNotice = `Strict language filter active [${langLabel}]: Found ${finalResults.length} matching communities. ${excludedCount} verified communities in other or unconfirmed languages were excluded to guarantee language relevance.`;
+          languageFilterNotice = `Strict language filter active [${langLabel}]: Found ${validMatchingCount} active matching communities. ${excludedCount} verified communities in other or unconfirmed languages were excluded to guarantee language relevance.`;
         }
       }
     }
