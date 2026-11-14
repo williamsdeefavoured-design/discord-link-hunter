@@ -58,10 +58,12 @@ async function startServer() {
   // the database connection.
   const app = buildServer();
 
-  const address = await app.listen({
-    port: config.API_PORT,
-    host: config.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1',
-  });
+
+const address = await app.listen({
+  port: config.API_PORT,
+  host: config.NODE_ENV === 'production' ? '::' : '127.0.0.1',
+});
+
 
   console.log(`[API] Discord Link Hunter running at ${address}`);
   console.log(`[API] Research mode: ${config.SEARCH_MODE}`);
