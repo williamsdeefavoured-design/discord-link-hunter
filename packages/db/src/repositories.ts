@@ -12,7 +12,7 @@ import {
 } from '@discord-link-hunter/core';
 import { getDbClient, isDatabaseConnectedSync } from './client.js';
 import * as schema from './schema.js';
-import { eq, desc, inArray } from 'drizzle-orm';
+import { and, eq, desc, inArray, lt, or } from 'drizzle-orm';
 import { getConfig } from '@discord-link-hunter/config';
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
@@ -27,6 +27,7 @@ export interface LinkHunterRepository {
   listJobs(limit?: number): Promise<SearchJob[]>;
   saveResults(jobId: string, results: RankedInviteResult[]): Promise<void>;
   getJobResults(jobId: string): Promise<RankedInviteResult[]>;
+  getPreviouslySeen(job: SearchJob, results: RankedInviteResult[]): Promise<Set<string>>;
   recordProviderUsage(provider: string, count: number, credits?: number, error?: string): Promise<void>;
   getProviderStats(): Promise<Record<string, { requests: number; credits: number; errors: number }>>;
 }
@@ -143,6 +144,19 @@ export class InMemoryRepository implements LinkHunterRepository {
       this.jobs.set(jobId, job);
     }
     this.persistToFile();
+  }
+
+  async getPreviouslySeen(job: SearchJob, results: RankedInviteResult[]): Promise<Set<string>> {
+    const requested = new Set(results.map(({ invite }) => invite.community?.id ? 'guild:' + invite.community.id : 'invite:' + invite.code));
+    const seen = new Set<string>();
+    for (const [id, previous] of this.jobs) {
+      if (previous.mode !== job.mode || previous.createdAt >= job.createdAt) continue;
+      for (const { invite } of this.jobResults.get(id) ?? previous.results) {
+        const key = invite.community?.id ? 'guild:' + invite.community.id : 'invite:' + invite.code;
+        if (requested.has(key)) seen.add(key);
+      }
+    }
+    return seen;
   }
 
   async getJobResults(jobId: string): Promise<RankedInviteResult[]> {
@@ -736,6 +750,23 @@ export class PostgresRepository implements LinkHunterRepository {
         })
         .onConflictDoNothing();
     }
+  }
+
+  async getPreviouslySeen(job: SearchJob, results: RankedInviteResult[]): Promise<Set<string>> {
+    const db = getDbClient();
+    if (!db || results.length === 0) return new Set();
+    const guilds = results.flatMap(({ invite }) => invite.community?.id ? [invite.community.id] : []);
+    const codes = results.filter(({ invite }) => !invite.community?.id).map(({ invite }) => invite.code);
+    const rows = await db.select({ code: schema.invites.code, guild: schema.invites.communityId })
+      .from(schema.searchJobResults)
+      .innerJoin(schema.searchJobs, eq(schema.searchJobResults.jobId, schema.searchJobs.id))
+      .innerJoin(schema.invites, eq(schema.searchJobResults.inviteCode, schema.invites.code))
+      .where(and(
+        lt(schema.searchJobs.createdAt, new Date(job.createdAt)),
+        eq(schema.searchJobs.mode, job.mode),
+        or(inArray(schema.invites.communityId, guilds), inArray(schema.invites.code, codes)),
+      ));
+    return new Set(rows.flatMap(({ guild, code }) => guild ? ['guild:' + guild, 'invite:' + code] : ['invite:' + code]));
   }
 
   async getJobResults(jobId: string): Promise<RankedInviteResult[]> {

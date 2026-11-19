@@ -16,6 +16,7 @@ import {
   LanguageCode,
   matchesCountryFilter,
   type RankedInviteResult,
+  type SearchJob,
   SUPPORTED_LANGUAGES,
   TradingTopic,
   TRADING_TOPICS,
@@ -29,6 +30,7 @@ import {
 } from '@discord-link-hunter/db';
 
 type ResultFilters = {
+  newOnly?: string;
   minScore?: string;
   status?: string;
   topic?: string;
@@ -358,6 +360,13 @@ export function buildServer(
   });
 
   // Get job results with filtering
+  async function filterNew(job: SearchJob | null, results: RankedInviteResult[], query: ResultFilters) {
+    if (!job || query.newOnly !== 'true') return results;
+    const seen = await repo.getPreviouslySeen(job, results);
+    return results.filter(({ invite }) =>
+      !seen.has(invite.community?.id ? 'guild:' + invite.community.id : 'invite:' + invite.code));
+  }
+
   app.get('/api/results/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
     const query = req.query as ResultFilters;
@@ -368,7 +377,9 @@ export function buildServer(
     const inactiveCount = results.filter((r) => r.invite.status !== 'valid').length;
     const activeStoredCount = totalStored - inactiveCount;
 
-    results = filterResults(results, query);
+    results = await filterNew(job, filterResults(results, query), query);
+    const countryUnconfirmed = query.country && query.country !== 'all' ? [] :
+      await filterNew(job, filterResults(job?.progress.countryUnconfirmed ?? [], query), query);
 
     let potentialLeads = job?.potentialLeads || [];
     if (query.platform && query.platform !== 'all') {
@@ -389,6 +400,7 @@ export function buildServer(
       activeStoredCount,
       results,
       potentialLeads,
+      countryUnconfirmed,
     };
   });
 
@@ -398,7 +410,8 @@ export function buildServer(
     const query = req.query as ResultFilters & { format?: string };
     const format = query.format === 'csv' ? 'csv' : 'json';
 
-    const results = filterResults(await repo.getJobResults(id), query);
+    const job = query.newOnly === 'true' ? await repo.getJob(id) : null;
+    const results = await filterNew(job, filterResults(await repo.getJobResults(id), query), query);
 
     if (format === 'csv') {
       const headers = [

@@ -24,7 +24,7 @@ export class QueryPlanner {
     this.sourceRegistry = sourceRegistry || getDefaultSourceRegistry();
   }
 
-  generatePlan(params: SearchJobParams): QueryPlanItem[] {
+  generatePlan(params: SearchJobParams, maxQueries = this.maxQueries): QueryPlanItem[] {
     const planned: QueryPlanItem[] = [];
     const seenQueries = new Set<string>();
 
@@ -40,9 +40,9 @@ export class QueryPlanner {
     // Build planned source targets based on budget and platform selection
     const targetsToUse: PlannedSourceTarget[] = [];
 
-    if (targetPlatforms && activeSources.length > this.maxQueries && this.maxQueries > 0) {
-      for (let index = 0; index < this.maxQueries; index++) {
-        const group = activeSources.filter((_, i) => i % this.maxQueries === index);
+    if (targetPlatforms && activeSources.length > maxQueries && maxQueries > 0) {
+      for (let index = 0; index < maxQueries; index++) {
+        const group = activeSources.filter((_, i) => i % maxQueries === index);
         targetsToUse.push({
           operator: '(' + group.map((source) => source.searchOperatorTemplate).join(' OR ') + ')',
           platform: group.map((source) => source.id).join(','),
@@ -56,7 +56,7 @@ export class QueryPlanner {
           platform: src.id,
         });
       }
-    } else if (this.maxQueries >= activeSources.length + 1) {
+    } else if (maxQueries >= activeSources.length + 1) {
       // Full budget mode (>= 11 queries): Generate dedicated individual query per platform
       targetsToUse.push({ operator: null, platform: 'general_web' });
       for (const src of activeSources) {
@@ -112,7 +112,7 @@ export class QueryPlanner {
 
     for (let round = 0; round < combinations.length * maxVariants; round++) {
       for (const [targetIndex, target] of targetsToUse.entries()) {
-        if (planned.length >= this.maxQueries) return planned;
+        if (planned.length >= maxQueries) return planned;
         const combination = combinations[(round + targetIndex) % combinations.length];
         const variantIndex = Math.floor(round / combinations.length);
         if (variantIndex >= combination.variants.length) continue;

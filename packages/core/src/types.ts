@@ -190,6 +190,10 @@ export interface SearchJobProgress {
   urlsDiscovered: number;
   sourceHits?: number;
   qualifiedCommunities?: number;
+  verificationPlanned?: number;
+  expandedAfterVerification?: boolean;
+  stage?: 'searching' | 'widening' | 'verifying' | 'saving';
+  countryUnconfirmed?: RankedInviteResult[];
   invitesExtracted: number;
   uniqueInvites: number;
   invitesChecked: number;

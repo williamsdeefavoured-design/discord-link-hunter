@@ -194,4 +194,21 @@ describe('Phase 3 — Results Consistency & Inactive Invite Exclusion', () => {
       expect(nextBtnInactive.data.custom_id).toBe(`page:${testJobId}:2:user-123:expired_or_revoked`);
     });
   });
+  it('hides a guild found in an earlier job even if its invite code changed', async () => {
+    const current = (await repo.getJob(testJobId))!;
+    const earlier = createRanked('old-invite', 'valid', 80);
+    earlier.invite.community!.id = 'guild-valid-1';
+    await repo.saveJob({ ...current, id: 'earlier-guild-job', createdAt: '2020-01-01T00:00:00Z', results: [earlier] });
+    await repo.saveResults('earlier-guild-job', [earlier]);
+
+    const headers = { 'x-api-key': 'test_consistency_key' };
+    const query = '?newOnly=true&status=valid';
+    const displayed = await app.inject({ url: '/api/results/' + testJobId + query, headers });
+    const exported = await app.inject({ url: '/api/export/' + testJobId + query + '&format=json', headers });
+
+    expect(displayed.statusCode).toBe(200);
+    expect(displayed.json().results.map((row: RankedInviteResult) => row.invite.code)).toEqual(['valid-2']);
+    expect(exported.json()).toEqual(displayed.json().results);
+  });
+
 });
