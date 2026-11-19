@@ -188,6 +188,8 @@ export interface SearchJobProgress {
   queriesSuccessful: number;
   queriesFailed: number;
   urlsDiscovered: number;
+  sourceHits?: number;
+  qualifiedCommunities?: number;
   invitesExtracted: number;
   uniqueInvites: number;
   invitesChecked: number;

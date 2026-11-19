@@ -68,6 +68,8 @@ export class SearchOrchestrator {
       queriesSuccessful: 0,
       queriesFailed: 0,
       urlsDiscovered: 0,
+      sourceHits: 0,
+      qualifiedCommunities: 0,
       invitesExtracted: 0,
       uniqueInvites: 0,
       invitesChecked: 0,
@@ -104,6 +106,11 @@ export class SearchOrchestrator {
     const discoveredInvitesMap = new Map<string, DiscoveredInvite[]>();
     const potentialLeads: PotentialCommunityLead[] = [];
     const seenLeadUrls = new Set<string>();
+    const sourceUrls = new Set<string>();
+    const recordSource = (url: string) => {
+      sourceUrls.add(url.split('#')[0]);
+      progress.urlsDiscovered = sourceUrls.size;
+    };
     const providerUsage: Record<string, number> = {
       serper: 0,
       tavily: 0,
@@ -136,7 +143,7 @@ export class SearchOrchestrator {
               providerUsage[this.primaryProvider.name] = (providerUsage[this.primaryProvider.name] || 0) + 1;
               searchResult = await this.primaryProvider.search(item.query, {
                 language: item.language,
-                limit: params.limit,
+                country: params.country,
                 depth: params.depth,
               });
 
@@ -160,7 +167,7 @@ export class SearchOrchestrator {
               providerUsage[this.secondaryProvider.name] = (providerUsage[this.secondaryProvider.name] || 0) + 1;
               searchResult = await this.secondaryProvider.search(item.query, {
                 language: item.language,
-                limit: params.limit,
+                country: params.country,
                 depth: params.depth,
               });
             }
@@ -187,12 +194,13 @@ export class SearchOrchestrator {
               progress.queriesSuccessful++;
             }
 
-            progress.urlsDiscovered += searchResult.items.length;
+            progress.sourceHits = (progress.sourceHits ?? 0) + searchResult.items.length;
 
             // Extract invites from search snippets and links
             for (const itemResult of searchResult.items) {
               const sourcePlatform = identifySourcePlatform(itemResult.url);
               if (!sourceAllowed(itemResult.url)) continue;
+              recordSource(itemResult.url);
               const combinedText = `${itemResult.title}\n${itemResult.snippet}\n${itemResult.url}`;
               const extracted = extractDiscordInvites(combinedText, itemResult.url, searchResult.provider);
 
@@ -279,7 +287,9 @@ export class SearchOrchestrator {
             limit: 5,
             depth: 2,
           });
+          progress.sourceHits = (progress.sourceHits ?? 0) + expansionResult.items.length;
           for (const itemResult of expansionResult.items) {
+            recordSource(itemResult.url);
             const combinedText = `${itemResult.title}\n${itemResult.snippet}\n${itemResult.url}`;
             const extracted = extractDiscordInvites(combinedText, itemResult.url, 'tavily');
             for (const inv of extracted) {
@@ -391,6 +401,7 @@ export class SearchOrchestrator {
     }
 
     const finalResults = ranked.slice(0, params.limit);
+    progress.qualifiedCommunities = ranked.filter(({ invite }) => invite.status === 'valid').length;
 
     let languageFilterNotice: string | undefined;
     let countryFilterNotice: string | undefined;

@@ -339,26 +339,32 @@ export default function JobsPage() {
 
                 <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-2 border-t border-slate-800/60 text-xs">
                   <div>
-                    <span className="text-slate-500">URLs Discovered:</span>{' '}
+                    <span className="text-slate-500">{job.progress.sourceHits === undefined ? 'Source hits:' : 'Distinct source URLs:'}</span>{' '}
                     <span className="font-mono text-slate-200">{job.progress.urlsDiscovered}</span>
                   </div>
                   <div>
-                    <span className="text-slate-500">Unique Invites:</span>{' '}
+                    <span className="text-slate-500">Distinct invites:</span>{' '}
                     <span className="font-mono text-slate-200">{job.progress.uniqueInvites ?? job.progress.invitesExtracted}</span>
                   </div>
                   <div>
-                    <span className="text-slate-500">Checked / Verified:</span>{' '}
+                    <span className="text-slate-500">Invites checked:</span>{' '}
                     <span className="font-mono text-slate-200">{job.progress.invitesChecked ?? job.progress.invitesVerified}</span>
                   </div>
                   <div>
-                    <span className="text-slate-500">Valid Active:</span>{' '}
+                    <span className="text-slate-500">Valid before filters:</span>{' '}
                     <span className="font-mono text-emerald-400 font-bold">{job.progress.validInvites ?? job.progress.validInvitesFound}</span>
                   </div>
                   <div>
-                    <span className="text-slate-500">Invalid / Expired:</span>{' '}
+                    <span className="text-slate-500">Invalid / expired:</span>{' '}
                     <span className="font-mono text-rose-400 font-bold">{job.progress.invalidInvites ?? 0}</span>
                   </div>
                 </div>
+
+                {job.progress.qualifiedCommunities !== undefined && (
+                  <p className="text-xs text-slate-400">
+                    {job.progress.sourceHits} search hits across queries · {job.progress.qualifiedCommunities} active communities met your filters · {job.progress.uncheckedInvites ?? 0} invites unchecked
+                  </p>
+                )}
 
                 {job.errorDetails && (
                   <div className="p-2.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-xs text-rose-400">

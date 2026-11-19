@@ -88,6 +88,10 @@ describe('Exact discovery source and membership constraints', () => {
     expect(search).toHaveBeenCalled();
     expect(search.mock.calls.every(([query]) => query.includes('site:'))).toBe(true);
     expect(output.results.map((item) => item.invite.code)).toEqual(['large']);
+    expect(output.progress).toMatchObject({
+      sourceHits: search.mock.calls.length * 2, urlsDiscovered: expected.length,
+      uniqueInvites: 3, invitesChecked: 3, validInvites: 3, qualifiedCommunities: 1,
+    });
     expect([...new Set(output.results[0].sources.map((source) => source.sourceUrl))].sort()).toEqual([...expected].sort());
   });
 });
