@@ -481,6 +481,9 @@ function ResultsContent() {
                           <a className="block text-sky-300" href={countryEvidence.sourceUrl} target="_blank" rel="noopener noreferrer">Country evidence source</a>
                         )}
                       </details>
+                      {res.scoreBreakdown.preferenceMatch === false && res.invite.status === 'valid' && (
+                        <p className="text-xs text-amber-300">Broader result</p>
+                      )}
                       {res.invite.community?.description && (
                         <p className="text-[11px] text-slate-400 truncate mt-0.5">
                           {res.invite.community.description}

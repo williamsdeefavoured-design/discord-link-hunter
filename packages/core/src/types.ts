@@ -147,6 +147,7 @@ export interface VerifiedInvite {
 }
 
 export interface ScoreBreakdown {
+  preferenceMatch?: boolean;
   topicRelevance: number; // max 35
   inviteValidity: number; // max 20
   languageMatch: number; // max 15
@@ -190,6 +191,7 @@ export interface SearchJobProgress {
   urlsDiscovered: number;
   sourceHits?: number;
   qualifiedCommunities?: number;
+  broadMatchesShown?: number;
   verificationPlanned?: number;
   expandedAfterVerification?: boolean;
   stage?: 'searching' | 'widening' | 'verifying' | 'saving';

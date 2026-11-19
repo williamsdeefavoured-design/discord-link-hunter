@@ -117,7 +117,7 @@ export default function DiscoverPage() {
           <span>Launch Community Discovery</span>
         </h1>
         <p className="mt-1 text-sm text-slate-400">
-          Configure a targeted, bounded search across trading sectors and international languages.
+          Choose a topic and language to prioritize. Active invites can still appear when those details are unconfirmed.
         </p>
       </div>
 
@@ -150,7 +150,7 @@ export default function DiscoverPage() {
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <label htmlFor="country" className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
-              Country Focus (Strict Evidence-Based)
+              Country Focus
             </label>
             <span className="text-[11px] text-slate-500 font-normal">
               Non-African ISO Alpha-2
@@ -184,7 +184,7 @@ export default function DiscoverPage() {
           </div>
           {country !== 'all' ? (
             <p className="text-[11px] text-indigo-300/90 leading-relaxed">
-              Strict filter active: Communities need independently verified evidence or an explicit guild self-declaration for {SELECTABLE_COUNTRIES.find((c) => c.code === country)?.name || country}. Communities with unknown or differing countries are strictly excluded.
+              Searches prioritize {SELECTABLE_COUNTRIES.find((c) => c.code === country)?.name || country}. Active communities from other or unknown locations may also appear.
             </p>
           ) : (
             <p className="text-[11px] text-slate-500">

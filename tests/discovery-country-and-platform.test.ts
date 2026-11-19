@@ -165,3 +165,20 @@ it('widens a regional search and keeps unconfirmed matches separate', async () =
   expect(output.progress.countryUnconfirmed?.map(({ invite }) => invite.code)).toEqual(['unknown']);
   expect([...new Set(stages)]).toEqual(['searching', 'widening', 'verifying', 'saving']);
 });
+
+it('retains working invites in broad discovery when strict preferences would hide them', async () => {
+  const search = vi.fn(async (query: string) => ({
+    provider: 'serper' as const, query, statusCode: 200, durationMs: 1,
+    items: [{ url: 'https://reddit.com/r/markets/comments/example', title: 'Discord community',
+      snippet: 'https://discord.gg/broad-match' }],
+  }));
+  const output = await new SearchOrchestrator({
+    primaryProvider: { name: 'serper', search, isAvailable: () => true, getDailyRequestCount: () => 0 },
+    queryPlanner: new QueryPlanner(1),
+    includeBroadMatches: true,
+    verifyInviteFn: async (code) => invite(code, 'Welcome to our stock market discussion.'),
+  }).executeJob({ topics: ['forex'], languages: ['en'], country: 'FR', limit: 1, depth: 1 });
+  expect(output.results.map(({ invite }) => invite.code)).toEqual(['broad-match']);
+  expect(output.results[0].scoreBreakdown.preferenceMatch).toBe(false);
+  expect(output.progress).toMatchObject({ qualifiedCommunities: 0, broadMatchesShown: 1 });
+});

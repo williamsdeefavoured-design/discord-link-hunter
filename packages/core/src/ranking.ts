@@ -236,6 +236,8 @@ export function compareRankedResults(a: RankedInviteResult, b: RankedInviteResul
   const aValid = a.invite.status === 'valid' ? 1 : 0;
   const bValid = b.invite.status === 'valid' ? 1 : 0;
   if (bValid !== aValid) return bValid - aValid;
+  const preferenceOrder = Number(b.scoreBreakdown.preferenceMatch !== false) - Number(a.scoreBreakdown.preferenceMatch !== false);
+  if (preferenceOrder !== 0) return preferenceOrder;
   if (b.score !== a.score) return b.score - a.score;
   const aMembers = a.invite.community?.approximateMemberCount || 0;
   const bMembers = b.invite.community?.approximateMemberCount || 0;

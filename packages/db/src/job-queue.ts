@@ -139,6 +139,7 @@ export class JobQueueManager {
           maxConcurrent: config.SEARCH_MAX_CONCURRENT_REQUESTS,
           verifyInviteFn: verifyDiscordInvite,
           isSimulated: false,
+          includeBroadMatches: true,
         });
       } else {
         // Explicit Mock Mode using simulated adapter and deterministic verifier
