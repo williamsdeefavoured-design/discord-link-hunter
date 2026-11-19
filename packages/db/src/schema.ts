@@ -1,3 +1,4 @@
+import type { DiscoveredInvite } from '@discord-link-hunter/core';
 import { pgTable, text, varchar, integer, timestamp, jsonb, boolean, primaryKey } from 'drizzle-orm/pg-core';
 
 export const communities = pgTable('communities', {
@@ -11,6 +12,12 @@ export const communities = pgTable('communities', {
   icon: text('icon'),
   banner: text('banner'),
   splash: text('splash'),
+  countryCode: varchar('country_code', { length: 8 }),
+  countryName: text('country_name'),
+  countryEvidenceStatus: varchar('country_evidence_status', { length: 32 }).default('unknown'),
+  countrySourceUrl: text('country_source_url'),
+  countrySupportingEvidence: text('country_supporting_evidence'),
+  countryVerifiedAt: timestamp('country_verified_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
@@ -69,6 +76,10 @@ export const searchJobs = pgTable('search_jobs', {
   estimatedCredits: integer('estimated_credits').default(0),
   dryRunExplanation: text('dry_run_explanation'),
   languageFilterNotice: text('language_filter_notice'),
+  country: varchar('country', { length: 8 }),
+  targetPlatforms: jsonb('target_platforms').$type<string[]>(),
+  minMembers: integer('min_members'),
+  countryFilterNotice: text('country_filter_notice'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   startedAt: timestamp('started_at', { withTimezone: true }),
   completedAt: timestamp('completed_at', { withTimezone: true }),
@@ -84,8 +95,15 @@ export const searchJobResults = pgTable('search_job_results', {
     .references(() => invites.code, { onDelete: 'cascade' }),
   score: integer('score').notNull(),
   scoreBreakdown: jsonb('score_breakdown').$type<any>().notNull(),
+  sourceSnapshot: jsonb('source_snapshot').$type<DiscoveredInvite[]>(),
   detectedTopics: jsonb('detected_topics').$type<string[]>(),
   detectedLanguage: varchar('detected_language', { length: 8 }),
+  countryCode: varchar('country_code', { length: 8 }),
+  countryName: text('country_name'),
+  countryEvidenceStatus: varchar('country_evidence_status', { length: 32 }).default('unknown'),
+  countrySourceUrl: text('country_source_url'),
+  countrySupportingEvidence: text('country_supporting_evidence'),
+  countryVerifiedAt: timestamp('country_verified_at', { withTimezone: true }),
   isSimulated: boolean('is_simulated').default(false),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });

@@ -92,6 +92,48 @@ export const LANGUAGE_TRADING_DICTIONARIES: Record<LanguageCode, Record<TradingT
     technical_analysis: ['تحليل فني', 'حركة السعر', 'نماذج فنية', 'برايس اكشن'],
     education: ['تعليم تداول', 'دورة تداول', 'تعلم الفوركس', 'كورس تداول'],
   },
+  it: {
+    forex: ["mercato valutario","valute"],
+    xauusd: ["trading sull oro","analisi dell oro"],
+    stocks: ["mercato azionario","azioni"],
+    crypto: ["criptovalute","mercato delle criptovalute"],
+    futures: ["contratti a termine"],
+    options: ["opzioni finanziarie"],
+    indices: ["indici di borsa"],
+    day_trading: ["trading giornaliero"],
+    swing_trading: ["operazioni swing"],
+    investing: ["investimenti","investire"],
+    technical_analysis: ["analisi tecnica"],
+    education: ["formazione sul trading","imparare a fare trading"],
+  },
+  tr: {
+    forex: ["döviz piyasası","döviz işlemleri"],
+    xauusd: ["altın işlemleri","altın analizi"],
+    stocks: ["hisse senetleri","borsa"],
+    crypto: ["kripto para","dijital varlıklar"],
+    futures: ["vadeli işlemler"],
+    options: ["opsiyon işlemleri"],
+    indices: ["borsa endeksleri"],
+    day_trading: ["gün içi işlemler"],
+    swing_trading: ["salınım ticareti"],
+    investing: ["yatırım","portföy"],
+    technical_analysis: ["teknik analiz"],
+    education: ["işlem eğitimi"],
+  },
+  nl: {
+    forex: ["valutahandel","valutamarkt"],
+    xauusd: ["goudhandel","goudprijs"],
+    stocks: ["aandelen","aandelenmarkt"],
+    crypto: ["cryptovaluta","digitale munten"],
+    futures: ["termijncontracten"],
+    options: ["optiehandel"],
+    indices: ["beursindices"],
+    day_trading: ["daghandel"],
+    swing_trading: ["swinghandel"],
+    investing: ["beleggen","beleggingsportefeuille"],
+    technical_analysis: ["technische analyse"],
+    education: ["leren handelen"],
+  },
 };
 
 export const DISCORD_SEARCH_TERMS = [
@@ -222,6 +264,9 @@ const LANGUAGE_HINTS: Record<LanguageCode, string[]> = {
   es: ['español', 'española', 'bienvenidos', 'comunidad', 'mercado de divisas', 'señales', 'análisis', 'inversores', 'mercado bursátil'],
   pt: ['português', 'portugues', 'brasileiro', 'brasil', 'bem vindos', 'comunidade', 'ações', 'opções', 'investimentos', 'câmbio', 'ibovespa'],
   fr: ['français', 'française', 'bienvenue', 'communauté', 'marché des changes', 'signaux', 'investisseurs', 'investissement', 'devises'],
+  it: ['benvenuti', 'la nostra comunità', 'degli investimenti', 'mercati finanziari'],
+  tr: ['topluluğumuza', 'piyasalarda', 'yatırımcılar', 'işlem stratejileri'],
+  nl: ['welkom bij', 'onze gemeenschap', 'beleggers', 'financiële markten'],
   ar: ['العربية', 'عربي', 'تداول', 'الأسهم', 'الذهب', 'استثمار', 'مجتمع', 'توصيات', 'مستثمرين'],
 };
 
@@ -275,6 +320,9 @@ export function detectLanguageEvidence(text: string): LanguageEvidence {
     es: ['español', 'spanish', 'españa', 'latinoamérica'],
     pt: ['português', 'portuguese', 'brasil', 'brazil', 'portugal'],
     fr: ['français', 'french', 'france'],
+    it: ['lingua italiana', 'in italiano'],
+    tr: ['türkçe', 'türkçe konuşan'],
+    nl: ['nederlandstalig', 'in het nederlands'],
     ar: ['arabic', 'عربي', 'العربية'],
   };
 

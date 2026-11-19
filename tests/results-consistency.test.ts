@@ -24,7 +24,7 @@ describe('Phase 3 — Results Consistency & Inactive Invite Exclusion', () => {
       status,
       community: {
         id: `guild-${code}`,
-        name: `Server ${code}`,
+        name: code === 'valid-1' ? '=1+1' : `Server ${code}`,
         description: 'Forex day trading signals',
         approximateMemberCount: 1000,
         approximatePresenceCount: 200,
@@ -106,6 +106,23 @@ describe('Phase 3 — Results Consistency & Inactive Invite Exclusion', () => {
 
   afterAll(async () => {
     await app.close();
+  });
+
+
+  it('exports the displayed result set and protects spreadsheet cells', async () => {
+    const headers = { 'x-api-key': 'test_consistency_key' };
+    const filters = 'status=valid&minScore=85&language=en&platform=reddit';
+    const displayed = await app.inject({ url: '/api/results/' + testJobId + '?' + filters, headers });
+    const json = await app.inject({ url: '/api/export/' + testJobId + '?' + filters + '&format=json', headers });
+    const csv = await app.inject({ url: '/api/export/' + testJobId + '?' + filters + '&format=csv', headers });
+
+    expect(json.statusCode).toBe(200);
+    expect(json.json()).toEqual(displayed.json().results);
+    expect(csv.statusCode).toBe(200);
+    expect(csv.payload.split('\n')).toHaveLength(2);
+    expect(csv.payload).toContain(`"'=1+1"`);
+    expect(csv.payload).toContain('https://reddit.com/r/forex/valid-1');
+    expect(csv.payload).not.toContain('valid-2');
   });
 
   describe('Fastify API Endpoint Filtering & Excluded Counts', () => {

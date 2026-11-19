@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const SUPPORTED_LANGUAGES = ['en', 'de', 'es', 'pt', 'fr', 'ar'] as const;
+export const SUPPORTED_LANGUAGES = ['en', 'de', 'es', 'pt', 'fr', 'ar', 'it', 'tr', 'nl'] as const;
 export type LanguageCode = (typeof SUPPORTED_LANGUAGES)[number];
 export type DetectedLanguage = LanguageCode | 'unknown';
 
@@ -29,6 +29,22 @@ export const INVITE_STATUSES = [
   'unknown',
 ] as const;
 export type InviteStatus = (typeof INVITE_STATUSES)[number];
+
+export const COUNTRY_EVIDENCE_STATUSES = [
+  'verified',
+  'self_declared',
+  'unknown',
+] as const;
+export type CountryEvidenceStatus = (typeof COUNTRY_EVIDENCE_STATUSES)[number];
+
+export interface CountryEvidence {
+  countryCode: string | null; // ISO 3166-1 alpha-2 code or null
+  countryName: string | null; // Official country name or null
+  status: CountryEvidenceStatus;
+  sourceUrl?: string | null;
+  supportingEvidence?: string | null;
+  lastVerifiedAt: string | null;
+}
 
 export const JOB_STATUSES = [
   'queued',
@@ -98,6 +114,7 @@ export interface CommunityMetadata {
   verificationLevel?: number;
   features?: string[];
   vanityUrlCode?: string | null;
+  countryEvidence?: CountryEvidence | null;
 }
 
 export interface DiscoveredInvite {
@@ -147,6 +164,7 @@ export interface RankedInviteResult {
   scoreBreakdown: ScoreBreakdown;
   detectedTopics: TradingTopic[];
   detectedLanguage: DetectedLanguage;
+  countryEvidence?: CountryEvidence | null;
   isVerifiedFact: boolean;
   isSimulated?: boolean;
   alternateInviteCodes?: string[];
@@ -155,6 +173,7 @@ export interface RankedInviteResult {
 export interface SearchJobParams {
   topics: TradingTopic[];
   languages: LanguageCode[];
+  country?: string;
   limit: number;
   depth: number;
   minMembers?: number;
@@ -176,6 +195,7 @@ export interface SearchJobProgress {
   invalidInvites: number;
   restrictedOrUnverified: number;
   languageFilteredOutCount?: number;
+  countryFilteredOutCount?: number;
   potentialLeadsCount?: number;
   leadsWithoutInvite?: number;
   // Backwards compatibility aliases:
@@ -212,4 +232,5 @@ export interface SearchJob {
   estimatedCredits?: number;
   dryRunExplanation?: string;
   languageFilterNotice?: string;
+  countryFilterNotice?: string;
 }

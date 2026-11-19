@@ -1,4 +1,5 @@
 import {
+  CountryEvidence,
   DetectedLanguage,
   DiscoveredInvite,
   LanguageCode,
@@ -13,6 +14,7 @@ import {
   hasGeneralTradingContext,
   hasNonTradingContext,
 } from './languages.js';
+import { detectCountryEvidence, matchesCountryFilter } from './countries.js';
 
 export function calculateInviteScore(
   invite: VerifiedInvite,
@@ -24,6 +26,7 @@ export function calculateInviteScore(
   scoreBreakdown: ScoreBreakdown;
   detectedTopics: TradingTopic[];
   detectedLanguage: DetectedLanguage;
+  countryEvidence: CountryEvidence;
 } {
   const explanations: string[] = [];
 
@@ -35,6 +38,9 @@ export function calculateInviteScore(
     invite.channelName || '',
   ].filter(Boolean).join(' ');
   const sourceText = sources.map((source) => source.contextSnippet || '').filter(Boolean).join(' ');
+
+  const countryEvidence =
+    invite.community?.countryEvidence || detectCountryEvidence(invite.community?.description ?? '', invite.canonicalUrl);
 
   const serverTopics = detectTopicsFromText(serverText);
   const sourceTopics = detectTopicsFromText(sourceText);
@@ -222,7 +228,7 @@ export function calculateInviteScore(
     explanations,
   };
 
-  return { score: total, scoreBreakdown, detectedTopics, detectedLanguage };
+  return { score: total, scoreBreakdown, detectedTopics, detectedLanguage, countryEvidence };
 }
 
 /** Valid invites first, then descending score, member count and invite code. */
@@ -254,15 +260,11 @@ export function rankInviteResults(
   verifiedInvites: { invite: VerifiedInvite; sources: DiscoveredInvite[] }[],
   requestedTopics: TradingTopic[],
   requestedLanguages: LanguageCode[],
-  options?: { strictFilter?: boolean }
+  options?: { strictFilter?: boolean; country?: string; onCountryRejected?: () => void; onRelevanceRejected?: () => void }
 ): RankedInviteResult[] {
   const ranked = verifiedInvites.map(({ invite, sources }) => {
-    const { score, scoreBreakdown, detectedTopics, detectedLanguage } = calculateInviteScore(
-      invite,
-      sources,
-      requestedTopics,
-      requestedLanguages
-    );
+    const { score, scoreBreakdown, detectedTopics, detectedLanguage, countryEvidence } =
+      calculateInviteScore(invite, sources, requestedTopics, requestedLanguages);
 
     return {
       invite,
@@ -271,6 +273,7 @@ export function rankInviteResults(
       scoreBreakdown,
       detectedTopics,
       detectedLanguage,
+      countryEvidence,
       isVerifiedFact: invite.status === 'valid',
     };
   });
@@ -285,10 +288,11 @@ export function rankInviteResults(
   }
 
   // Strict relevance filtering:
-  // A candidate must satisfy BOTH:
+  // A candidate must satisfy:
   // 1. Credible requested-language evidence (if requestedLanguages specified)
   // 2. Credible requested-topic evidence (if requestedTopics specified)
-  // Never fill missing slots with English, unknown language, or unrelated topic communities.
+  // 3. Credible requested-country evidence (if country specified and not 'all')
+  // Never fill missing slots with English, unknown language, unrelated topic, or other/unknown country.
   return deduplicated.filter((res) => {
     // 1. Language relevance check
     if (requestedLanguages.length > 0) {
@@ -296,6 +300,7 @@ export function rankInviteResults(
         res.detectedLanguage === 'unknown' ||
         !requestedLanguages.includes(res.detectedLanguage as LanguageCode)
       ) {
+        if (res.invite.status === 'valid') options?.onRelevanceRejected?.();
         return false;
       }
     }
@@ -303,6 +308,15 @@ export function rankInviteResults(
     // 2. Topic relevance check
     if (requestedTopics.length > 0) {
       if (!hasCredibleTopicEvidence(res, requestedTopics)) {
+        if (res.invite.status === 'valid') options?.onRelevanceRejected?.();
+        return false;
+      }
+    }
+
+    // 3. Country relevance check
+    if (options?.country && options.country !== 'all') {
+      if (!matchesCountryFilter(res.countryEvidence, options.country)) {
+        if (res.invite.status === 'valid') options.onCountryRejected?.();
         return false;
       }
     }
@@ -396,6 +410,16 @@ export function deduplicateCommunityResults(
         existing.detectedTopics = Array.from(new Set([...existing.detectedTopics, ...item.detectedTopics]));
         existing.detectedLanguage = item.detectedLanguage;
         existing.isVerifiedFact = item.isVerifiedFact;
+        if (item.countryEvidence && item.countryEvidence.status !== 'unknown') {
+          existing.countryEvidence = item.countryEvidence;
+        }
+      } else if (
+        (!existing.countryEvidence || existing.countryEvidence.status === 'unknown') &&
+        item.countryEvidence &&
+        item.countryEvidence.status !== 'unknown'
+      ) {
+        // Upgrade country evidence from duplicate invite if existing is unknown
+        existing.countryEvidence = item.countryEvidence;
       }
     }
   }

@@ -163,6 +163,7 @@ export class JobQueueManager {
         estimatedCredits,
         dryRunExplanation,
         languageFilterNotice,
+        countryFilterNotice,
         providerUsage,
       } = await orchestrator.executeJob(job.params, async (currentProgress) => {
         await this.repo.updateJobProgress(jobId, currentProgress, 'running');
@@ -190,6 +191,7 @@ export class JobQueueManager {
       }
 
       job.languageFilterNotice = languageFilterNotice;
+      job.countryFilterNotice = countryFilterNotice;
 
       // Determine final status
       let finalStatus: SearchJob['status'] = 'completed';

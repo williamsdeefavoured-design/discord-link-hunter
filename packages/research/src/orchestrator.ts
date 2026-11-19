@@ -11,6 +11,7 @@ import {
   verifyDiscordInvite,
   detectTopicsFromText,
   detectLanguageEvidence,
+  getCountryName,
 } from '@discord-link-hunter/core';
 import { QueryPlanner } from './query-planner.js';
 import { QueryPlanItem, SearchProvider } from './types.js';
@@ -34,6 +35,7 @@ export interface OrchestrationResult {
   estimatedCredits?: number;
   dryRunExplanation?: string;
   languageFilterNotice?: string;
+  countryFilterNotice?: string;
   providerUsage?: Record<string, number>;
 }
 
@@ -182,6 +184,12 @@ export class SearchOrchestrator {
 
             // Extract invites from search snippets and links
             for (const itemResult of searchResult.items) {
+              const sourcePlatform = identifySourcePlatform(itemResult.url);
+              if (params.targetPlatforms?.length &&
+                  (!/^https?:\/\//i.test(itemResult.url) || !sourcePlatform || !params.targetPlatforms.includes(sourcePlatform.id) ||
+                   (sourcePlatform.id === 'discord_discovery' && !/^https?:\/\/(?:www\.)?discord\.com\/servers(?:[/?#]|$)/i.test(itemResult.url)))) {
+                continue;
+              }
               const combinedText = `${itemResult.title}\n${itemResult.snippet}\n${itemResult.url}`;
               const extracted = extractDiscordInvites(combinedText, itemResult.url, searchResult.provider);
 
@@ -197,7 +205,7 @@ export class SearchOrchestrator {
                 // Collect discovered public discussions as potential community leads without confirmed invites.
                 if (itemResult.url && !seenLeadUrls.has(itemResult.url)) {
                   seenLeadUrls.add(itemResult.url);
-                  const platformConfig = identifySourcePlatform(itemResult.url);
+                  const platformConfig = sourcePlatform;
                   const platformId = platformConfig?.id || 'general_web';
                   const platformName = platformConfig?.name || 'General Web';
                   const category = platformConfig?.category || 'general_web';
@@ -319,21 +327,9 @@ export class SearchOrchestrator {
         progress.invitesVerified = progress.invitesChecked;
 
         if (verified.status === 'valid') {
-          // If minMembers filter requested, check threshold
-          if (params.minMembers && verified.community?.approximateMemberCount) {
-            if (verified.community.approximateMemberCount >= params.minMembers) {
-              progress.validInvites++;
-              progress.validInvitesFound = progress.validInvites;
-              verifiedList.push({ invite: verified, sources });
-            } else {
-              progress.restrictedOrUnverified++;
-              verifiedList.push({ invite: verified, sources });
-            }
-          } else {
-            progress.validInvites++;
-            progress.validInvitesFound = progress.validInvites;
-            verifiedList.push({ invite: verified, sources });
-          }
+          progress.validInvites++;
+          progress.validInvitesFound = progress.validInvites;
+          verifiedList.push({ invite: verified, sources });
         } else if (verified.status === 'expired_or_revoked') {
           progress.invalidInvites++;
           verifiedList.push({ invite: verified, sources });
@@ -360,8 +356,19 @@ export class SearchOrchestrator {
       if (onProgress) onProgress({ ...progress });
     }
 
-    // Rank verified results with strict language relevance
-    const ranked = rankInviteResults(verifiedList, params.topics, params.languages);
+    // Rank verified results with strict language and country relevance
+    const eligibleByMembership = verifiedList.filter(({ invite }) => {
+      if (!params.minMembers) return true;
+      const count = invite.community?.approximateMemberCount;
+      return count != null && count >= params.minMembers;
+    });
+    let countryExcludedCount = 0;
+    let relevanceExcludedCount = 0;
+    const ranked = rankInviteResults(eligibleByMembership, params.topics, params.languages, {
+      country: params.country,
+      onCountryRejected: () => { countryExcludedCount++; },
+      onRelevanceRejected: () => { relevanceExcludedCount++; },
+    });
     for (const r of ranked) {
       if (this.isSimulated) {
         r.isSimulated = true;
@@ -371,15 +378,14 @@ export class SearchOrchestrator {
     const finalResults = ranked.slice(0, params.limit);
 
     let languageFilterNotice: string | undefined;
+    let countryFilterNotice: string | undefined;
     const hasTopics = Boolean(params.topics && params.topics.length > 0);
     const hasLanguages = Boolean(params.languages && params.languages.length > 0);
+    const hasCountry = Boolean(params.country && params.country !== 'all');
 
     if (hasTopics || hasLanguages) {
-      const validVerifiedCount = verifiedList.filter((v) => v.invite.status === 'valid').length;
       const validMatchingCount = finalResults.filter((r) => r.invite.status === 'valid').length;
-      const totalEligibleValidCount = ranked.filter((r) => r.invite.status === 'valid').length;
-      // Exclusion only means failed relevance, not omitted due to the result limit.
-      const excludedCount = Math.max(0, validVerifiedCount - totalEligibleValidCount);
+      const excludedCount = relevanceExcludedCount;
       progress.languageFilteredOutCount = excludedCount;
 
       if (finalResults.length < params.limit && excludedCount > 0) {
@@ -396,11 +402,21 @@ export class SearchOrchestrator {
       }
     }
 
+    if (hasCountry) {
+      const countryCode = params.country!.toUpperCase();
+      const countryName = getCountryName(countryCode) || countryCode;
+      const validMatchingCount = finalResults.filter((r) => r.invite.status === 'valid').length;
+      progress.countryFilteredOutCount = countryExcludedCount;
+
+      countryFilterNotice = `Country filter for ${countryName} (${countryCode}). ${validMatchingCount} active matches shown. ${countryExcludedCount} otherwise relevant communities had unknown or different country evidence. Explicit community self-declarations qualify.`;
+    }
+
     return {
       results: finalResults,
       progress,
       potentialLeads,
       languageFilterNotice,
+      countryFilterNotice,
       providerUsage,
     };
   }

@@ -12,6 +12,7 @@ import {
 import { getConfig } from '@discord-link-hunter/config';
 import {
   canonicalizeDiscordInvite,
+  getSelectableCountries,
   LanguageCode,
   RankedInviteResult,
   SearchJob,
@@ -49,6 +50,10 @@ export function buildResultsPageEmbed(
     description += `\n⚠️ *${job.languageFilterNotice}*`;
   }
 
+  if (job?.countryFilterNotice) {
+    description += `\n🌍 *${job.countryFilterNotice}*`;
+  }
+
   const trimForEmbed = (value: string, length: number) => value.length <= length ? value : value.slice(0, length - 1) + '…';
   const embed = new EmbedBuilder()
     .setColor(0x5865f2)
@@ -74,12 +79,16 @@ export function buildResultsPageEmbed(
       new Set(res.sources?.map((s) => s.sourcePlatformName || s.sourcePlatform).filter(Boolean))
     );
     const sourcesText = sourcePlatforms.length > 0 ? ` | Via: \`${sourcePlatforms.join(', ')}\`` : '';
+    const countryEv = res.countryEvidence || res.invite.community?.countryEvidence;
+    const countryText = countryEv?.countryCode
+      ? ` | Country: \`${countryEv.countryCode}\` (${countryEv.status === 'verified' ? 'Verified' : 'Declared'})`
+      : '';
 
     embed.addFields({
       name: trimForEmbed(`#${rank} • Score ${res.score}/100: ${serverName}`, 256),
       value:
         `${link}${members}\n` +
-        `Status: \`${res.invite.status}\` | Lang: \`${res.detectedLanguage}\`${sourcesText}\n` +
+        `Status: \`${res.invite.status}\` | Lang: \`${res.detectedLanguage}\`${countryText}${sourcesText}\n` +
         trimForEmbed(`*${explanations}*`, 900),
     });
   });
@@ -257,6 +266,12 @@ export const slashCommands = [
       opt
         .setName('limit')
         .setDescription('Max number of invites to find (1-20)')
+        .setRequired(false)
+    )
+    .addStringOption((opt) =>
+      opt
+        .setName('country')
+        .setDescription('Country focus ISO alpha-2 code (e.g. US, GB, ES, DE) - African countries excluded')
         .setRequired(false)
     ),
 
@@ -494,6 +509,16 @@ export async function handleInteraction(
       Math.min(interaction.options.getInteger('limit') || 5, 20)
     );
 
+    const countryParam = interaction.options.getString('country')?.trim().toUpperCase();
+    if (countryParam && countryParam !== 'ALL') {
+      if (!getSelectableCountries().some(({ code }) => code === countryParam)) {
+        await interaction.editReply({
+          content: `❌ Country \`${countryParam}\` is unavailable. Enter a selectable ISO country code or ALL.`,
+        });
+        return;
+      }
+    }
+
     const depth = commandName === 'deepsearch' ? 2 : 1;
 
     // User-facing searches are always Live; test fixtures remain in Vitest.
@@ -504,6 +529,7 @@ export async function handleInteraction(
       {
         topics: [topic],
         languages: [language],
+        country: countryParam && countryParam !== 'ALL' ? countryParam : undefined,
         limit,
         depth,
       },
@@ -512,10 +538,11 @@ export async function handleInteraction(
     );
 
     // Initial response
+    const countryLine = countryParam && countryParam !== 'ALL' ? ` | Country: \`${countryParam}\`` : '';
     await interaction.editReply({
       content:
         `🔍 **Discovery Job Queued** (\`${job.id}\`)\n` +
-        `Topic: \`${topic}\` | Language: \`${language}\` | ` +
+        `Topic: \`${topic}\` | Language: \`${language}\`${countryLine} | ` +
         `Limit: \`${limit}\` | Depth: \`${depth}\` | ` +
         `Mode: **${mode.toUpperCase()}**\n` +
         `*Running search pipeline...*`,
@@ -546,6 +573,9 @@ export async function handleInteraction(
       }
       if (finishedJob.languageFilterNotice) {
         content += `\n⚠️ *${finishedJob.languageFilterNotice}*`;
+      }
+      if (finishedJob.countryFilterNotice) {
+        content += `\n🌍 *${finishedJob.countryFilterNotice}*`;
       }
       await interaction.followUp({ content });
       return;

@@ -1,5 +1,6 @@
 import {
   CommunityMetadata,
+  CountryEvidence,
   DiscoveredInvite,
   identifySourcePlatform,
   RankedInviteResult,
@@ -13,6 +14,7 @@ import { getDbClient, isDatabaseConnectedSync } from './client.js';
 import * as schema from './schema.js';
 import { eq, desc, inArray } from 'drizzle-orm';
 import { getConfig } from '@discord-link-hunter/config';
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -34,6 +36,7 @@ export class InMemoryRepository implements LinkHunterRepository {
   private jobs = new Map<string, SearchJob>();
   private jobResults = new Map<string, RankedInviteResult[]>();
   private storageDir: string;
+  private persist = getConfig().NODE_ENV !== 'test' && process.env.VITEST !== 'true';
   private storageFile: string;
   private usageStats: Record<string, { requests: number; credits: number; errors: number }> = {
     serper: { requests: 0, credits: 0, errors: 0 },
@@ -45,7 +48,7 @@ export class InMemoryRepository implements LinkHunterRepository {
     this.storageDir = path.resolve(process.cwd(), 'data');
     this.storageFile = path.join(this.storageDir, 'jobs-store.json');
 
-    const loaded = this.loadFromFile();
+    const loaded = this.persist && this.loadFromFile();
     if (!loaded) {
       this.seedMockData();
       this.persistToFile();
@@ -53,6 +56,7 @@ export class InMemoryRepository implements LinkHunterRepository {
   }
 
   private persistToFile(): void {
+    if (!this.persist) return;
     try {
       if (!fs.existsSync(this.storageDir)) {
         fs.mkdirSync(this.storageDir, { recursive: true });
@@ -177,6 +181,14 @@ export class InMemoryRepository implements LinkHunterRepository {
             description: 'Dedicated to Gold/XAUUSD price action and intraday trading.',
             approximateMemberCount: 8200,
             approximatePresenceCount: 1450,
+            countryEvidence: {
+              countryCode: 'US',
+              countryName: 'United States',
+              status: 'self_declared',
+              sourceUrl: 'https://goldtradershub.com/invite',
+              supportingEvidence: 'Live New York session gold scalping based in United States',
+              lastVerifiedAt: new Date().toISOString(),
+            },
           },
           lastVerifiedAt: new Date().toISOString(),
         },
@@ -205,6 +217,14 @@ export class InMemoryRepository implements LinkHunterRepository {
         },
         detectedTopics: ['xauusd', 'day_trading', 'technical_analysis'],
         detectedLanguage: 'en',
+        countryEvidence: {
+          countryCode: 'US',
+          countryName: 'United States',
+          status: 'self_declared',
+          sourceUrl: 'https://goldtradershub.com/invite',
+          supportingEvidence: 'Live New York session gold scalping based in United States',
+          lastVerifiedAt: new Date().toISOString(),
+        },
         isVerifiedFact: true,
         isSimulated: true,
       },
@@ -220,6 +240,14 @@ export class InMemoryRepository implements LinkHunterRepository {
             description: 'Live forex market analysis, webinars, and educational signals.',
             approximateMemberCount: 4520,
             approximatePresenceCount: 680,
+            countryEvidence: {
+              countryCode: 'GB',
+              countryName: 'United Kingdom',
+              status: 'verified',
+              sourceUrl: 'https://tradingdirectory.co.uk/forex-traders-club',
+              supportingEvidence: 'Authoritative ccTLD domain: tradingdirectory.co.uk',
+              lastVerifiedAt: new Date().toISOString(),
+            },
           },
           lastVerifiedAt: new Date().toISOString(),
         },
@@ -228,8 +256,8 @@ export class InMemoryRepository implements LinkHunterRepository {
             rawUrl: 'https://discord.gg/fx-elite-club',
             code: 'fx-elite-club',
             canonicalUrl: 'https://discord.gg/fx-elite-club',
-            sourceUrl: 'https://tradingdirectory.org/forex-traders-club',
-            sourceDomain: 'tradingdirectory.org',
+            sourceUrl: 'https://tradingdirectory.co.uk/forex-traders-club',
+            sourceDomain: 'tradingdirectory.co.uk',
             provider: 'mock',
             discoveredAt: new Date().toISOString(),
             contextSnippet: 'Join premier FX trading community https://discord.gg/fx-elite-club with 4500 active traders',
@@ -248,6 +276,14 @@ export class InMemoryRepository implements LinkHunterRepository {
         },
         detectedTopics: ['forex', 'education'],
         detectedLanguage: 'en',
+        countryEvidence: {
+          countryCode: 'GB',
+          countryName: 'United Kingdom',
+          status: 'verified',
+          sourceUrl: 'https://tradingdirectory.co.uk/forex-traders-club',
+          supportingEvidence: 'Authoritative ccTLD domain: tradingdirectory.co.uk',
+          lastVerifiedAt: new Date().toISOString(),
+        },
         isVerifiedFact: true,
         isSimulated: true,
       },
@@ -263,6 +299,13 @@ export class InMemoryRepository implements LinkHunterRepository {
             description: 'مجتمع تعليمي مجاني للتحليل الفني وتداول الذهب.',
             approximateMemberCount: 3100,
             approximatePresenceCount: 420,
+            countryEvidence: {
+              countryCode: null,
+              countryName: null,
+              status: 'unknown',
+              supportingEvidence: 'No geographic origin declared or authoritative domain identified',
+              lastVerifiedAt: new Date().toISOString(),
+            },
           },
           lastVerifiedAt: new Date().toISOString(),
         },
@@ -291,6 +334,13 @@ export class InMemoryRepository implements LinkHunterRepository {
         },
         detectedTopics: ['xauusd', 'technical_analysis', 'education'],
         detectedLanguage: 'ar',
+        countryEvidence: {
+          countryCode: null,
+          countryName: null,
+          status: 'unknown',
+          supportingEvidence: 'No geographic origin declared or authoritative domain identified',
+          lastVerifiedAt: new Date().toISOString(),
+        },
         isVerifiedFact: true,
         isSimulated: true,
       },
@@ -304,6 +354,7 @@ export class InMemoryRepository implements LinkHunterRepository {
       params: {
         topics: ['forex', 'xauusd'],
         languages: ['en', 'ar'],
+        country: 'all',
         limit: 10,
         depth: 1,
       },
@@ -364,6 +415,10 @@ export class PostgresRepository implements LinkHunterRepository {
         estimatedCredits: job.estimatedCredits ?? 0,
         dryRunExplanation: job.dryRunExplanation ?? null,
         languageFilterNotice: job.languageFilterNotice ?? null,
+        country: job.params.country ?? null,
+        targetPlatforms: job.params.targetPlatforms ?? null,
+        minMembers: job.params.minMembers ?? null,
+        countryFilterNotice: job.countryFilterNotice ?? null,
         createdAt: new Date(job.createdAt),
         startedAt: job.startedAt ? new Date(job.startedAt) : null,
         completedAt: job.completedAt ? new Date(job.completedAt) : null,
@@ -379,6 +434,10 @@ export class PostgresRepository implements LinkHunterRepository {
           estimatedCredits: job.estimatedCredits ?? 0,
           dryRunExplanation: job.dryRunExplanation ?? null,
           languageFilterNotice: job.languageFilterNotice ?? null,
+          country: job.params.country ?? null,
+          targetPlatforms: job.params.targetPlatforms ?? null,
+          minMembers: job.params.minMembers ?? null,
+          countryFilterNotice: job.countryFilterNotice ?? null,
           startedAt: job.startedAt ? new Date(job.startedAt) : null,
           completedAt: job.completedAt ? new Date(job.completedAt) : null,
         },
@@ -479,6 +538,9 @@ export class PostgresRepository implements LinkHunterRepository {
       params: {
         topics: (r.topics as any) || [],
         languages: (r.languages as any) || [],
+        country: r.country ?? undefined,
+        targetPlatforms: r.targetPlatforms ?? undefined,
+        minMembers: r.minMembers ?? undefined,
         limit: r.searchLimit,
         depth: r.depth,
         dryRun: r.status === 'dry_run_plan' || Boolean(r.plannedQueries),
@@ -494,6 +556,7 @@ export class PostgresRepository implements LinkHunterRepository {
       estimatedCredits: r.estimatedCredits ?? undefined,
       dryRunExplanation: r.dryRunExplanation ?? undefined,
       languageFilterNotice: r.languageFilterNotice ?? undefined,
+      countryFilterNotice: r.countryFilterNotice ?? undefined,
       createdAt: r.createdAt.toISOString(),
       startedAt: r.startedAt?.toISOString() ?? null,
       completedAt: r.completedAt?.toISOString() ?? null,
@@ -516,6 +579,9 @@ export class PostgresRepository implements LinkHunterRepository {
       params: {
         topics: (r.topics as any) || [],
         languages: (r.languages as any) || [],
+        country: r.country ?? undefined,
+        targetPlatforms: r.targetPlatforms ?? undefined,
+        minMembers: r.minMembers ?? undefined,
         limit: r.searchLimit,
         depth: r.depth,
         dryRun: r.status === 'dry_run_plan' || Boolean(r.plannedQueries),
@@ -531,6 +597,7 @@ export class PostgresRepository implements LinkHunterRepository {
       estimatedCredits: r.estimatedCredits ?? undefined,
       dryRunExplanation: r.dryRunExplanation ?? undefined,
       languageFilterNotice: r.languageFilterNotice ?? undefined,
+      countryFilterNotice: r.countryFilterNotice ?? undefined,
       createdAt: r.createdAt.toISOString(),
       startedAt: r.startedAt?.toISOString() ?? null,
       completedAt: r.completedAt?.toISOString() ?? null,
@@ -542,6 +609,7 @@ export class PostgresRepository implements LinkHunterRepository {
     if (!db) return;
 
     for (const res of results) {
+      const cEvidence = res.countryEvidence || res.invite.community?.countryEvidence;
       if (res.invite.community) {
         await db
           .insert(schema.communities)
@@ -556,6 +624,12 @@ export class PostgresRepository implements LinkHunterRepository {
             icon: res.invite.community.icon ?? null,
             banner: res.invite.community.banner ?? null,
             splash: res.invite.community.splash ?? null,
+            countryCode: cEvidence?.countryCode ?? null,
+            countryName: cEvidence?.countryName ?? null,
+            countryEvidenceStatus: cEvidence?.status ?? 'unknown',
+            countrySourceUrl: cEvidence?.sourceUrl ?? null,
+            countrySupportingEvidence: cEvidence?.supportingEvidence ?? null,
+            countryVerifiedAt: cEvidence?.lastVerifiedAt ? new Date(cEvidence.lastVerifiedAt) : null,
             updatedAt: new Date(),
           })
           .onConflictDoUpdate({
@@ -565,6 +639,12 @@ export class PostgresRepository implements LinkHunterRepository {
               description: res.invite.community.description ?? null,
               memberCount: res.invite.community.approximateMemberCount ?? null,
               presenceCount: res.invite.community.approximatePresenceCount ?? null,
+              countryCode: cEvidence?.countryCode ?? null,
+              countryName: cEvidence?.countryName ?? null,
+              countryEvidenceStatus: cEvidence?.status ?? 'unknown',
+              countrySourceUrl: cEvidence?.sourceUrl ?? null,
+              countrySupportingEvidence: cEvidence?.supportingEvidence ?? null,
+              countryVerifiedAt: cEvidence?.lastVerifiedAt ? new Date(cEvidence.lastVerifiedAt) : null,
               updatedAt: new Date(),
             },
           });
@@ -602,8 +682,15 @@ export class PostgresRepository implements LinkHunterRepository {
           inviteCode: res.invite.code,
           score: res.score,
           scoreBreakdown: res.scoreBreakdown,
+          sourceSnapshot: res.sources,
           detectedTopics: res.detectedTopics,
           detectedLanguage: res.detectedLanguage,
+          countryCode: cEvidence?.countryCode ?? null,
+          countryName: cEvidence?.countryName ?? null,
+          countryEvidenceStatus: cEvidence?.status ?? 'unknown',
+          countrySourceUrl: cEvidence?.sourceUrl ?? null,
+          countrySupportingEvidence: cEvidence?.supportingEvidence ?? null,
+          countryVerifiedAt: cEvidence?.lastVerifiedAt ? new Date(cEvidence.lastVerifiedAt) : null,
         })
         .onConflictDoNothing();
 
@@ -611,7 +698,7 @@ export class PostgresRepository implements LinkHunterRepository {
       if (res.sources && res.sources.length > 0) {
         for (const src of res.sources) {
           const sourceUrl = src.sourceUrl || src.rawUrl;
-          const sourceId = Buffer.from(sourceUrl).toString('base64url').slice(0, 64) || `src_${Date.now()}`;
+          const sourceId = createHash('sha256').update(sourceUrl).digest('hex');
           await db
             .insert(schema.sources)
             .values({
@@ -620,13 +707,15 @@ export class PostgresRepository implements LinkHunterRepository {
               domain: src.sourceDomain ?? null,
               sourceType: src.provider || 'unknown',
             })
-            .onConflictDoNothing();
+            .onConflictDoNothing({ target: schema.sources.url });
 
+          const [storedSource] = await db.select({ id: schema.sources.id }).from(schema.sources)
+            .where(eq(schema.sources.url, sourceUrl));
           await db
             .insert(schema.inviteSources)
             .values({
               inviteCode: res.invite.code,
-              sourceId,
+              sourceId: storedSource.id,
               contextSnippet: src.contextSnippet ?? null,
             })
             .onConflictDoNothing();
@@ -667,8 +756,8 @@ export class PostgresRepository implements LinkHunterRepository {
 
     if (rows.length === 0) return [];
 
-    const inviteCodes = rows.map((r) => r.invite.code);
-    const sourceRows = await db
+    const inviteCodes = rows.filter(({ result }) => result.sourceSnapshot === null).map(({ invite }) => invite.code);
+    const sourceRows = !inviteCodes.length ? [] : await db
       .select({
         inviteCode: schema.inviteSources.inviteCode,
         contextSnippet: schema.inviteSources.contextSnippet,
@@ -698,37 +787,53 @@ export class PostgresRepository implements LinkHunterRepository {
       sourcesByCode.set(sr.inviteCode, list);
     }
 
-    return rows.map(({ result, invite, community }) => ({
-      invite: {
-        code: invite.code,
-        canonicalUrl: invite.canonicalUrl,
-        status: invite.status as any,
-        statusReason: invite.statusReason ?? undefined,
-        community: community
-          ? {
-              id: community.id,
-              name: community.name,
-              description: community.description ?? null,
-              approximateMemberCount: community.memberCount ?? null,
-              approximatePresenceCount: community.presenceCount ?? null,
-              icon: community.icon ?? null,
-              banner: community.banner ?? null,
-              splash: community.splash ?? null,
-            }
-          : null,
-        channelId: invite.channelId ?? null,
-        channelName: invite.channelName ?? null,
-        inviterUsername: invite.inviterUsername ?? null,
-        expiresAt: invite.expiresAt?.toISOString() ?? null,
-        lastVerifiedAt: invite.lastCheckedAt.toISOString(),
-      },
-      sources: sourcesByCode.get(invite.code) || [],
-      score: result.score,
-      scoreBreakdown: result.scoreBreakdown as any,
-      detectedTopics: (result.detectedTopics as any) || [],
-      detectedLanguage: (result.detectedLanguage as any) || 'en',
-      isVerifiedFact: invite.status === 'valid',
-    })).sort(compareRankedResults);
+    return rows.map(({ result, invite, community }) => {
+      const status = result.countryEvidenceStatus === 'verified' || result.countryEvidenceStatus === 'self_declared'
+        ? result.countryEvidenceStatus
+        : result.countryEvidenceStatus === 'publicly_self_declared' ? 'self_declared' : 'unknown';
+      const countryEvidence: CountryEvidence = {
+        countryCode: status === 'unknown' ? null : result.countryCode,
+        countryName: status === 'unknown' ? null : result.countryName,
+        status,
+        sourceUrl: result.countrySourceUrl,
+        supportingEvidence: result.countrySupportingEvidence,
+        lastVerifiedAt: result.countryVerifiedAt?.toISOString() ?? null,
+      };
+
+      return {
+        invite: {
+          code: invite.code,
+          canonicalUrl: invite.canonicalUrl,
+          status: invite.status as any,
+          statusReason: invite.statusReason ?? undefined,
+          community: community
+            ? {
+                id: community.id,
+                name: community.name,
+                description: community.description ?? null,
+                approximateMemberCount: community.memberCount ?? null,
+                approximatePresenceCount: community.presenceCount ?? null,
+                icon: community.icon ?? null,
+                banner: community.banner ?? null,
+                splash: community.splash ?? null,
+                countryEvidence,
+              }
+            : null,
+          channelId: invite.channelId ?? null,
+          channelName: invite.channelName ?? null,
+          inviterUsername: invite.inviterUsername ?? null,
+          expiresAt: invite.expiresAt?.toISOString() ?? null,
+          lastVerifiedAt: invite.lastCheckedAt.toISOString(),
+        },
+        sources: result.sourceSnapshot ?? sourcesByCode.get(invite.code) ?? [],
+        score: result.score,
+        scoreBreakdown: result.scoreBreakdown as any,
+        detectedTopics: (result.detectedTopics as any) || [],
+        detectedLanguage: (result.detectedLanguage as any) || 'unknown',
+        countryEvidence,
+        isVerifiedFact: invite.status === 'valid',
+      };
+    }).sort(compareRankedResults);
   }
 
   async recordProviderUsage(provider: string, count: number, credits = 0, error?: string): Promise<void> {
