@@ -16,12 +16,12 @@ export const DEFAULT_RESEARCH_SOURCES: ResearchSourceConfig[] = [
     id: 'x_twitter',
     name: 'X (Twitter)',
     category: 'social_network',
-    domains: ['twitter.com', 'x.com', 't.co'],
+    domains: ['twitter.com', 'x.com'],
     accessMethod: 'public_search',
     enabled: true,
     searchOperatorTemplate: '(site:x.com OR site:twitter.com)',
     notes:
-      'Public post discovery via search. Direct Twitter API v2 Basic tier costs $100/mo and Pro costs $5,000/mo.',
+      'Indexed public post discovery via search. Coverage depends on provider indexing.',
   },
   {
     id: 'substack',
@@ -105,6 +105,17 @@ export const DEFAULT_RESEARCH_SOURCES: ResearchSourceConfig[] = [
     searchOperatorTemplate: '(site:forexfactory.com OR site:babypips.com OR site:elitetrader.com OR site:trade2win.com)',
     notes: 'Dedicated public forex, futures, and equity trading forums.',
   },
+  ...[
+    { id: 'disboard', name: 'DISBOARD', domain: 'disboard.org' },
+    { id: 'discadia', name: 'Discadia', domain: 'discadia.com' },
+    { id: 'top_gg', name: 'Top.gg', domain: 'top.gg' },
+    { id: 'discord_me', name: 'Discord.me', domain: 'discord.me' },
+    { id: 'discord_discovery', name: 'Discord public discovery', domain: 'discord.com' },
+  ].map(({ id, name, domain }): ResearchSourceConfig => ({
+    id, name, domains: [domain], category: 'general_web', accessMethod: 'public_search', enabled: true,
+    searchOperatorTemplate: id === 'discord_discovery' ? 'site:discord.com/servers' : 'site:' + domain,
+    notes: 'Indexed public directory pages. Coverage depends on provider indexing.',
+  })),
 ];
 
 export class SourceRegistry {

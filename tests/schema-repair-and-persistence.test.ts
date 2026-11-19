@@ -1,30 +1,96 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import postgres from 'postgres';
+import * as client from '../packages/db/src/client.js';
 import {
-  getRepository,
+  applyMigrations,
+  PostgresRepository,
   testDatabaseConnection,
 } from '../packages/db/src/index.js';
 import { slashCommands, buildResultsPageEmbed, buildPaginationRow } from '../apps/bot/src/commands.js';
-import { SearchJob } from '../packages/core/src/types.js';
+import { rankInviteResults, type SearchJob } from '../packages/core/src/index.js';
 
 describe('Database Schema Repair & Bot Startup Verification', () => {
-  beforeAll(async () => {
-    const status = await testDatabaseConnection();
-    if (!status.connected) {
-      console.warn('Skipping remote database tests: connection not verified in this environment');
-    }
+  it('keeps deployment database configuration out of Vitest', async () => {
+    expect(client.getDbClient()).toBeNull();
+    await expect(testDatabaseConnection()).resolves.toMatchObject({ connected: false });
   });
 
-  it('verifies that the database connection test succeeds and queries live jobs', async () => {
-    const status = await testDatabaseConnection();
-    if (status.connected) {
-      const repo = getRepository();
-      expect(repo.isMock).toBe(false);
-      const jobs = await repo.listJobs(3);
-      expect(jobs.length).toBeGreaterThanOrEqual(1);
-      // Verify languageFilterNotice property is accessible on jobs
-      expect('languageFilterNotice' in jobs[0] || jobs[0].languageFilterNotice === undefined || typeof jobs[0].languageFilterNotice === 'string').toBe(true);
-    }
-  });
+  it.skipIf(!process.env.DLH_TEST_DATABASE_URL)(
+    'migrates pre-country rows twice and reads them through the PostgreSQL repository',
+    async () => {
+      const url = new URL(process.env.DLH_TEST_DATABASE_URL!);
+      if (!['postgres:', 'postgresql:'].includes(url.protocol) ||
+          !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname) ||
+          url.pathname !== '/discord_link_hunter_test' ||
+          url.search || url.hash) {
+        throw new Error('Use a dedicated loopback PostgreSQL database named discord_link_hunter_test.');
+      }
+      const name = 'dlh_' + randomUUID().replaceAll('-', '');
+      const sql = postgres(url.href, { max: 1, idle_timeout: 0, connect_timeout: 5, onnotice: () => {} });
+      try {
+        await sql`CREATE SCHEMA ${sql(name)}`;
+        await sql`SET search_path TO ${sql(name)}`;
+        await sql`CREATE TABLE search_jobs (
+          id VARCHAR(64) PRIMARY KEY, owner_id TEXT, topics JSONB NOT NULL,
+          languages JSONB NOT NULL, search_limit INTEGER NOT NULL, depth INTEGER NOT NULL,
+          mode VARCHAR(16) NOT NULL, status VARCHAR(24) NOT NULL, progress JSONB NOT NULL,
+          error_details TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          started_at TIMESTAMPTZ, completed_at TIMESTAMPTZ
+        )`;
+        await sql`INSERT INTO search_jobs (id, topics, languages, search_limit, depth, mode, status, progress)
+          VALUES ('legacy', '["stocks"]', '["fr"]', 3, 1, 'live', 'completed', '{}')`;
+
+        await applyMigrations(sql);
+        await applyMigrations(sql);
+        const db = client.createDatabase(sql);
+        const getDb = vi.spyOn(client, 'getDbClient').mockReturnValue(db);
+        try {
+          const repo = new PostgresRepository();
+          const [legacy] = await repo.listJobs(3);
+          expect(legacy.id).toBe('legacy');
+          expect(legacy.params.country).toBeUndefined();
+          expect(legacy.languageFilterNotice).toBeUndefined();
+          await repo.saveJob({ ...legacy, id: 'current', params: { ...legacy.params, country: 'FR', minMembers: 100, targetPlatforms: ['reddit'] } });
+          expect((await repo.getJob('current'))?.params).toMatchObject({ country: 'FR', minMembers: 100, targetPlatforms: ['reddit'] });
+          const originalSource = 'https://reddit.com/r/markets/comments/fixture';
+          const original = rankInviteResults([{
+            invite: {
+              code: 'persisted', canonicalUrl: 'https://discord.gg/persisted', status: 'valid',
+              lastVerifiedAt: '2026-01-02T00:00:00Z',
+              community: { id: 'guild-fixture', name: 'Markets', description: 'We are based in France.' },
+            },
+            sources: [{
+              code: 'persisted', rawUrl: 'https://discord.gg/persisted', canonicalUrl: 'https://discord.gg/persisted',
+              sourceUrl: originalSource, provider: 'serper', discoveredAt: '2026-01-02T00:00:00Z',
+            }],
+          }], [], [], { country: 'FR' });
+          expect(original).toHaveLength(1);
+          await repo.saveResults('current', original);
+          await repo.saveJob({ ...legacy, id: 'other' });
+          await repo.saveResults('other', [{
+            ...original[0],
+            sources: [{ ...original[0].sources[0], sourceUrl: 'https://x.com/fixture/status/2' }],
+          }]);
+          const [stored] = await repo.getJobResults('current');
+          expect(stored.countryEvidence).toEqual(original[0].countryEvidence);
+          expect(stored.sources.map(({ sourceUrl }) => sourceUrl)).toEqual([originalSource]);
+          await expect(repo.deleteJob('current')).resolves.toBe(true);
+          expect(await repo.getJobResults('other')).toHaveLength(1);
+          expect((await repo.getJob('legacy'))?.params.languages).toEqual(['fr']);
+        } finally {
+          getDb.mockRestore();
+        }
+      } finally {
+        try {
+          await sql`DROP SCHEMA IF EXISTS ${sql(name)} CASCADE`;
+        } finally {
+          await sql.end({ timeout: 1 });
+        }
+      }
+    },
+    30_000,
+  );
 
   it('verifies enabled Discord slash commands remain properly configured', () => {
     const commandNames = slashCommands.map((c) => c.name);

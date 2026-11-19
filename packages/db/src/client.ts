@@ -14,6 +14,10 @@ import * as schema from './schema.js';
 
 type Database = ReturnType<typeof drizzle<typeof schema>>;
 
+export function createDatabase(client: postgres.Sql): Database {
+  return drizzle(client, { schema });
+}
+
 // Shared database instances
 let _db: Database | null = null;
 let _client: postgres.Sql | null = null;
@@ -97,7 +101,7 @@ export function getDbClient(): Database | null {
       prepare: false,
     });
 
-    _db = drizzle(_client, { schema });
+    _db = createDatabase(_client);
 
     // Do not mark connected here.
     // A real database query must succeed first.

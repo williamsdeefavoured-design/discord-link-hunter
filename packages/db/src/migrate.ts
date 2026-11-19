@@ -1,4 +1,6 @@
 import postgres from 'postgres';
+import { readFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
 import { getConfig } from '@discord-link-hunter/config';
 import { resolveConnectionString } from './client.js';
 
@@ -17,7 +19,21 @@ export async function runMigrations() {
   const sql = postgres(connectionString, { max: 1, connect_timeout: 15 });
 
   try {
-    await sql`
+    await applyMigrations(sql);
+    console.log('[Migrate] Successfully applied all migrations to Supabase Postgres!');
+    return { success: true };
+  } catch (err: any) {
+    console.error('[Migrate] Error running migrations:', err.message);
+    return { success: false, reason: err.message };
+  } finally {
+    await sql.end();
+  }
+}
+
+export async function applyMigrations(sql: postgres.Sql): Promise<void> {
+  await sql.begin(async (tx) => {
+    await tx`SELECT pg_advisory_xact_lock(25041103);`;
+    await tx`
       CREATE TABLE IF NOT EXISTS communities (
         id VARCHAR(64) PRIMARY KEY,
         name TEXT NOT NULL,
@@ -34,7 +50,7 @@ export async function runMigrations() {
       );
     `;
 
-    await sql`
+    await tx`
       CREATE TABLE IF NOT EXISTS invites (
         code VARCHAR(64) PRIMARY KEY,
         canonical_url TEXT NOT NULL,
@@ -50,7 +66,7 @@ export async function runMigrations() {
       );
     `;
 
-    await sql`
+    await tx`
       CREATE TABLE IF NOT EXISTS sources (
         id TEXT PRIMARY KEY,
         url TEXT NOT NULL UNIQUE,
@@ -60,7 +76,7 @@ export async function runMigrations() {
       );
     `;
 
-    await sql`
+    await tx`
       CREATE TABLE IF NOT EXISTS invite_sources (
         invite_code VARCHAR(64) NOT NULL REFERENCES invites(code) ON DELETE CASCADE,
         source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
@@ -70,7 +86,7 @@ export async function runMigrations() {
       );
     `;
 
-    await sql`
+    await tx`
       CREATE TABLE IF NOT EXISTS search_jobs (
         id VARCHAR(64) PRIMARY KEY,
         owner_id TEXT,
@@ -94,7 +110,7 @@ export async function runMigrations() {
       );
     `;
 
-    await sql`
+    await tx`
       CREATE TABLE IF NOT EXISTS search_job_results (
         id TEXT PRIMARY KEY,
         job_id VARCHAR(64) NOT NULL REFERENCES search_jobs(id) ON DELETE CASCADE,
@@ -108,7 +124,7 @@ export async function runMigrations() {
       );
     `;
 
-    await sql`
+    await tx`
       CREATE TABLE IF NOT EXISTS verification_history (
         id VARCHAR(64) PRIMARY KEY,
         invite_code VARCHAR(64) NOT NULL REFERENCES invites(code) ON DELETE CASCADE,
@@ -121,7 +137,7 @@ export async function runMigrations() {
       );
     `;
 
-    await sql`
+    await tx`
       CREATE TABLE IF NOT EXISTS provider_usage (
         id TEXT PRIMARY KEY,
         provider VARCHAR(32) NOT NULL,
@@ -134,38 +150,36 @@ export async function runMigrations() {
     `;
 
     // Ensure additive columns exist on pre-existing tables
-    await sql`ALTER TABLE search_jobs ADD COLUMN IF NOT EXISTS is_simulated BOOLEAN DEFAULT FALSE;`;
-    await sql`ALTER TABLE search_jobs ADD COLUMN IF NOT EXISTS planned_queries JSONB;`;
-    await sql`ALTER TABLE search_jobs ADD COLUMN IF NOT EXISTS estimated_requests INTEGER DEFAULT 0;`;
-    await sql`ALTER TABLE search_jobs ADD COLUMN IF NOT EXISTS estimated_credits INTEGER DEFAULT 0;`;
-    await sql`ALTER TABLE search_jobs ADD COLUMN IF NOT EXISTS dry_run_explanation TEXT;`;
-    await sql`ALTER TABLE search_jobs ADD COLUMN IF NOT EXISTS language_filter_notice TEXT;`;
-    await sql`ALTER TABLE search_job_results ADD COLUMN IF NOT EXISTS is_simulated BOOLEAN DEFAULT FALSE;`;
+    await tx`ALTER TABLE search_jobs ADD COLUMN IF NOT EXISTS is_simulated BOOLEAN DEFAULT FALSE;`;
+    await tx`ALTER TABLE search_jobs ADD COLUMN IF NOT EXISTS planned_queries JSONB;`;
+    await tx`ALTER TABLE search_jobs ADD COLUMN IF NOT EXISTS estimated_requests INTEGER DEFAULT 0;`;
+    await tx`ALTER TABLE search_jobs ADD COLUMN IF NOT EXISTS estimated_credits INTEGER DEFAULT 0;`;
+    await tx`ALTER TABLE search_jobs ADD COLUMN IF NOT EXISTS dry_run_explanation TEXT;`;
+    await tx`ALTER TABLE search_jobs ADD COLUMN IF NOT EXISTS language_filter_notice TEXT;`;
+    await tx`ALTER TABLE search_job_results ADD COLUMN IF NOT EXISTS is_simulated BOOLEAN DEFAULT FALSE;`;
+
+    await tx.unsafe(await readFile(new URL('../migrations/0003_add_country_evidence.sql', import.meta.url), 'utf8'));
+    await tx.unsafe(await readFile(new URL('../migrations/0004_add_result_country_timestamp.sql', import.meta.url), 'utf8'));
+
+    await tx.unsafe(await readFile(new URL('../migrations/0005_persist_discovery_filters.sql', import.meta.url), 'utf8'));
 
     // Indexes for fast querying
-    await sql`CREATE INDEX IF NOT EXISTS idx_invites_status ON invites(status);`;
-    await sql`CREATE INDEX IF NOT EXISTS idx_invites_community_id ON invites(community_id);`;
-    await sql`CREATE INDEX IF NOT EXISTS idx_search_jobs_status ON search_jobs(status);`;
-    await sql`CREATE INDEX IF NOT EXISTS idx_search_jobs_created_at ON search_jobs(created_at DESC);`;
-    await sql`CREATE INDEX IF NOT EXISTS idx_search_job_results_job_id ON search_job_results(job_id);`;
-    await sql`CREATE INDEX IF NOT EXISTS idx_search_job_results_score ON search_job_results(score DESC);`;
-    await sql`CREATE INDEX IF NOT EXISTS idx_verification_history_invite_code ON verification_history(invite_code);`;
-    await sql`CREATE INDEX IF NOT EXISTS idx_provider_usage_provider ON provider_usage(provider);`;
-
-    console.log('[Migrate] Successfully applied all migrations to Supabase Postgres!');
-    await sql.end();
-    return { success: true };
-  } catch (err: any) {
-    console.error('[Migrate] Error running migrations:', err.message);
-    await sql.end();
-    return { success: false, reason: err.message };
-  }
+    await tx`CREATE INDEX IF NOT EXISTS idx_invites_status ON invites(status);`;
+    await tx`CREATE INDEX IF NOT EXISTS idx_invites_community_id ON invites(community_id);`;
+    await tx`CREATE INDEX IF NOT EXISTS idx_search_jobs_status ON search_jobs(status);`;
+    await tx`CREATE INDEX IF NOT EXISTS idx_search_jobs_created_at ON search_jobs(created_at DESC);`;
+    await tx`CREATE INDEX IF NOT EXISTS idx_search_job_results_job_id ON search_job_results(job_id);`;
+    await tx`CREATE INDEX IF NOT EXISTS idx_search_job_results_score ON search_job_results(score DESC);`;
+    await tx`CREATE INDEX IF NOT EXISTS idx_verification_history_invite_code ON verification_history(invite_code);`;
+    await tx`CREATE INDEX IF NOT EXISTS idx_provider_usage_provider ON provider_usage(provider);`;
+  });
 }
 
-if (process.argv[1]?.endsWith('migrate.ts')) {
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
   runMigrations().then((res) => {
     if (!res.success) {
-      console.log('Migration completed with warning/notice:', res.reason);
+      console.error('Migration failed:', res.reason);
+      process.exitCode = 1;
     }
   });
 }

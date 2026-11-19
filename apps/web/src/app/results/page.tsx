@@ -7,6 +7,16 @@ import { RankedInviteResult } from '@discord-link-hunter/core';
 import { ScoreBadge } from '../../components/ScoreBadge';
 import { apiFetch } from '../../lib/api';
 
+function resultFilterParams(minScore: number, status: string, language: string, platform: string) {
+  const params = new URLSearchParams();
+  if (minScore > 0) params.append('minScore', minScore.toString());
+  if (status !== 'all') params.append('status', status);
+  if (language !== 'all') params.append('language', language);
+  if (platform !== 'all') params.append('platform', platform);
+
+  return params;
+}
+
 function ResultsContent() {
   const searchParams = useSearchParams();
   const requestedJobId = searchParams.get('job');
@@ -66,14 +76,8 @@ function ResultsContent() {
       setLoading(true);
       try {
         let url = `/api/results/${jobId}`;
-        const params = new URLSearchParams();
-        if (minScore > 0) params.append('minScore', minScore.toString());
-        if (statusFilter !== 'all') params.append('status', statusFilter);
-        if (languageFilter !== 'all') params.append('language', languageFilter);
-        if (platformFilter !== 'all') params.append('platform', platformFilter);
-
-        const qs = params.toString();
-        if (qs) url += `?${qs}`;
+        const query = resultFilterParams(minScore, statusFilter, languageFilter, platformFilter).toString();
+        if (query) url += `?${query}`;
 
         const result = await apiFetch<{ results: RankedInviteResult[]; potentialLeads?: any[]; excludedCount?: number; inactiveCount?: number; activeStoredCount?: number }>(url);
         if (result.ok && result.data?.results) {
@@ -125,6 +129,11 @@ function ResultsContent() {
     }
   };
 
+  const csvFilters = resultFilterParams(minScore, statusFilter, languageFilter, platformFilter);
+  const jsonFilters = new URLSearchParams(csvFilters);
+  csvFilters.set('format', 'csv');
+  jsonFilters.set('format', 'json');
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -157,7 +166,7 @@ function ResultsContent() {
         {/* Export buttons */}
         <div className="flex items-center space-x-2">
           <a
-            href={`/api/export/${jobId}?format=csv`}
+            href={`/api/export/${jobId}?${csvFilters}`}
             download
             className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 text-xs font-semibold border border-slate-800 transition"
           >
@@ -165,7 +174,7 @@ function ResultsContent() {
             <span>Export CSV</span>
           </a>
           <a
-            href={`/api/export/${jobId}?format=json`}
+            href={`/api/export/${jobId}?${jsonFilters}`}
             download
             className="inline-flex items-center space-x-1.5 px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 text-xs font-semibold border border-slate-800 transition"
           >
@@ -181,6 +190,14 @@ function ResultsContent() {
         </div>
       )}
 
+      {job?.countryFilterNotice && (
+        <p className="rounded-lg border border-indigo-900 bg-indigo-950/30 p-3 text-sm text-indigo-200">
+          {job.countryFilterNotice}
+        </p>
+      )}
+      {job?.params?.targetPlatforms?.length > 0 && (
+        <p className="text-xs text-slate-400">Selected sources {job.params.targetPlatforms.join(', ')}. Coverage depends on indexed public pages.</p>
+      )}
       {job?.languageFilterNotice && (
         <div className="p-3.5 rounded-xl border border-indigo-500/30 bg-indigo-500/10 text-indigo-300 text-xs flex items-center space-x-2">
           <Globe2 className="w-4 h-4 shrink-0 text-indigo-400" />
@@ -349,6 +366,15 @@ function ResultsContent() {
         </div>
       </div>
 
+      {job?.progress?.uncheckedInvites > 0 && (
+        <p className="text-xs text-slate-400">
+          Checked {job.progress.invitesChecked} of {job.progress.uniqueInvites} distinct invites.
+          {job.progress.discordVerificationRateLimited
+            ? ' Discord rate-limited verification, so the remaining invites were left unchecked.'
+            : ' The remaining invites were left unchecked.'}
+        </p>
+      )}
+
       {/* Results Table */}
       {loading ? (
         <div className="p-12 text-center text-slate-500 text-sm">Loading results...</div>
@@ -358,7 +384,7 @@ function ResultsContent() {
           <h2 className="text-xl font-semibold text-[#e6eff5]">No communities meet these conditions.</h2>
           <p className="max-w-[540px] mx-auto text-sm text-[#9aafc1] leading-relaxed">
             {activeStoredCount === 0
-              ? 'The research job has no stored active invitations that passed its relevance checks. This is not a connection failure.'
+              ? 'No active invitations passed all of this job’s discovery filters.'
               : 'Some stored invitations are active, but your current score, language, or platform filters hide them.'}
           </p>
           {job?.progress?.validInvitesFound > 0 && (
@@ -394,6 +420,7 @@ function ResultsContent() {
               {results.map((res, index) => {
                 const communityName = res.invite.community?.name || res.invite.code;
                 const members = res.invite.community?.approximateMemberCount;
+                const countryEvidence = res.countryEvidence;
                 const online = res.invite.community?.approximatePresenceCount;
 
                 return (
@@ -414,6 +441,20 @@ function ResultsContent() {
                           </span>
                         )}
                       </div>
+                      <details className="mt-1 text-xs text-slate-400">
+                        <summary className="cursor-pointer">
+                          {countryEvidence?.countryName ?? 'Unknown country'}
+                          {countryEvidence?.status === 'verified' ? ' · Verified' :
+                            countryEvidence?.status === 'self_declared' ? ' · Self-declared' : ''}
+                        </summary>
+                        <p>{countryEvidence?.supportingEvidence ?? 'No qualifying country evidence.'}</p>
+                        {countryEvidence?.lastVerifiedAt && <time dateTime={countryEvidence.lastVerifiedAt}>
+                          {new Date(countryEvidence.lastVerifiedAt).toLocaleDateString()}
+                        </time>}
+                        {countryEvidence?.sourceUrl && /^https?:\/\//i.test(countryEvidence.sourceUrl) && (
+                          <a className="block text-sky-300" href={countryEvidence.sourceUrl} target="_blank" rel="noopener noreferrer">Country evidence source</a>
+                        )}
+                      </details>
                       {res.invite.community?.description && (
                         <p className="text-[11px] text-slate-400 truncate mt-0.5">
                           {res.invite.community.description}

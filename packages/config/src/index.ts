@@ -19,7 +19,7 @@ function loadRootEnv() {
   dotenv.config();
 }
 
-loadRootEnv();
+if (process.env.NODE_ENV !== 'test' && process.env.VITEST !== 'true') loadRootEnv();
 
 export const ConfigSchema = z.object({
   // Discord
@@ -77,14 +77,16 @@ let _config: AppConfig | null = null;
 
 export function getConfig(): AppConfig {
   if (!_config) {
-    const parsed = ConfigSchema.safeParse(process.env);
+    const automatedTest = process.env.NODE_ENV === 'test' || process.env.VITEST === 'true';
+    const parsed = ConfigSchema.safeParse(
+      automatedTest ? { ...process.env, DATABASE_URL: '', DIRECT_URL: '' } : process.env,
+    );
     if (!parsed.success) {
       const issues = parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join(', ');
       throw new Error(`Environment validation failed: ${issues}`);
     }
     // Keep the mock adapter for automated tests only.
     // A stale SEARCH_MODE=mock in .env cannot enable simulated discoveries in normal use.
-    const automatedTest = process.env.NODE_ENV === 'test' || process.env.VITEST === 'true';
     _config = automatedTest ? parsed.data : { ...parsed.data, SEARCH_MODE: 'live' };
   }
   return _config;

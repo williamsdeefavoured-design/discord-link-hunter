@@ -377,7 +377,11 @@ describe('Public Research Sources & Platform Discovery', () => {
 
       expect(res.statusCode).toBe(200);
       const data = JSON.parse(res.payload);
-      expect(data.sources).toHaveLength(10);
+      expect(data.sources.map((source: { id: string }) => source.id).sort())
+        .toEqual(DEFAULT_RESEARCH_SOURCES.map(({ id }) => id).sort());
+      expect(data.sources.map((source: { id: string }) => source.id)).toEqual(expect.arrayContaining([
+        'disboard', 'discadia', 'top_gg', 'discord_me', 'discord_discovery',
+      ]));
       expect(data.sources.map((s: any) => s.id)).toContain('reddit');
       expect(data.sources.map((s: any) => s.id)).toContain('tradingview');
 

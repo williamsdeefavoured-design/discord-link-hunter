@@ -12,7 +12,10 @@ import {
   canonicalizeDiscordInvite,
   compareRankedResults,
   DEFAULT_RESEARCH_SOURCES,
+  getSelectableCountries,
   LanguageCode,
+  matchesCountryFilter,
+  type RankedInviteResult,
   SUPPORTED_LANGUAGES,
   TradingTopic,
   TRADING_TOPICS,
@@ -24,6 +27,66 @@ import {
   LinkHunterRepository,
   testDatabaseConnection,
 } from '@discord-link-hunter/db';
+
+type ResultFilters = {
+  minScore?: string;
+  status?: string;
+  topic?: string;
+  language?: string;
+  country?: string;
+  platform?: string;
+};
+
+function filterResults(results: RankedInviteResult[], query: ResultFilters): RankedInviteResult[] {
+  if (query.minScore) {
+    const minScore = parseInt(query.minScore, 10);
+    results = results.filter((r) => r.score >= minScore);
+  }
+
+  if (query.status) {
+    if (query.status === 'valid') {
+      results = results.filter((r) => r.invite.status === 'valid');
+    } else if (query.status === 'expired_or_revoked') {
+      results = results.filter((r) => r.invite.status !== 'valid');
+    } else if (query.status !== 'all') {
+      results = results.filter((r) => r.invite.status === query.status);
+    }
+  }
+
+  if (query.topic) {
+    results = results.filter((r) => r.detectedTopics.includes(query.topic as TradingTopic));
+  }
+
+  if (query.language) {
+    results = results.filter((r) => r.detectedLanguage === query.language);
+  }
+
+  if (query.country) {
+    results = results.filter((result) =>
+      matchesCountryFilter(result.countryEvidence ?? result.invite.community?.countryEvidence, query.country),
+    );
+  }
+
+  if (query.platform && query.platform !== 'all') {
+    const target = query.platform.toLowerCase();
+    results = results.filter((r) =>
+      r.sources.some(
+        (s) =>
+          s.sourcePlatform?.toLowerCase() === target ||
+          s.sourceDomain?.toLowerCase().includes(target)
+      )
+    );
+  }
+
+  return [...results].sort(compareRankedResults);
+}
+
+function csvCell(value: string | number | null | undefined): string {
+  if (typeof value === 'number') return String(value);
+  const text = value ?? '';
+  const safe = /^[\t\r\n]|^\s*[=+@-]/u.test(text) ? "'" + text : text;
+  return '"' + safe.replaceAll('"', '""') + '"';
+}
 
 export interface ServerOptions {
   apiKey?: string;
@@ -59,7 +122,7 @@ export function buildServer(
   app.addHook('onRequest', async (req, reply) => {
     // Public endpoints
     const url = req.url.split('?')[0];
-    if (url === '/health' || url === '/api/sources' || req.method === 'OPTIONS') {
+    if (url === '/health' || url === '/api/sources' || url === '/api/countries' || req.method === 'OPTIONS') {
       return;
     }
 
@@ -128,11 +191,18 @@ export function buildServer(
   const CreateJobSchema = z.object({
     topics: z.array(z.enum(TRADING_TOPICS)).default(['forex', 'xauusd']),
     languages: z.array(z.enum(SUPPORTED_LANGUAGES)).default(['en']),
+    country: z.string().trim().transform((value) => value.toUpperCase()).refine(
+      (value) => value === '' || value === 'ALL' || getSelectableCountries().some(({ code }) => code === value),
+      'Choose a selectable ISO country code or All Countries',
+    ).transform((value) => value === '' || value === 'ALL' ? undefined : value).optional(),
     limit: z.number().int().min(1).max(50).default(10),
     depth: z.number().int().min(1).max(2).default(1),
-    minMembers: z.number().int().optional(),
+    minMembers: z.number().int().nonnegative().optional(),
     dryRun: z.boolean().optional(),
-    targetPlatforms: z.array(z.string()).optional(),
+    targetPlatforms: z.array(z.string().refine(
+      (id) => DEFAULT_RESEARCH_SOURCES.some((source) => source.enabled && source.id === id),
+      'Choose an available research platform',
+    )).optional(),
     mode: z.enum(['mock', 'live']).optional(),
   });
 
@@ -282,16 +352,15 @@ export function buildServer(
     return { sources: DEFAULT_RESEARCH_SOURCES };
   });
 
+  // Get selectable non-African countries
+  app.get('/api/countries', async () => {
+    return { countries: getSelectableCountries() };
+  });
+
   // Get job results with filtering
   app.get('/api/results/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const query = req.query as {
-      minScore?: string;
-      status?: string;
-      topic?: string;
-      language?: string;
-      platform?: string;
-    };
+    const query = req.query as ResultFilters;
 
     let results = await repo.getJobResults(id);
     const job = await repo.getJob(id);
@@ -299,41 +368,7 @@ export function buildServer(
     const inactiveCount = results.filter((r) => r.invite.status !== 'valid').length;
     const activeStoredCount = totalStored - inactiveCount;
 
-    if (query.minScore) {
-      const minScore = parseInt(query.minScore, 10);
-      results = results.filter((r) => r.score >= minScore);
-    }
-
-    if (query.status) {
-      if (query.status === 'valid') {
-        results = results.filter((r) => r.invite.status === 'valid');
-      } else if (query.status === 'expired_or_revoked') {
-        results = results.filter((r) => r.invite.status !== 'valid');
-      } else if (query.status !== 'all') {
-        results = results.filter((r) => r.invite.status === query.status);
-      }
-    }
-
-    if (query.topic) {
-      results = results.filter((r) => r.detectedTopics.includes(query.topic as TradingTopic));
-    }
-
-    if (query.language) {
-      results = results.filter((r) => r.detectedLanguage === query.language);
-    }
-
-    if (query.platform && query.platform !== 'all') {
-      const target = query.platform.toLowerCase();
-      results = results.filter((r) =>
-        r.sources.some(
-          (s) =>
-            s.sourcePlatform?.toLowerCase() === target ||
-            s.sourceDomain?.toLowerCase().includes(target)
-        )
-      );
-    }
-
-    results.sort(compareRankedResults);
+    results = filterResults(results, query);
 
     let potentialLeads = job?.potentialLeads || [];
     if (query.platform && query.platform !== 'all') {
@@ -360,10 +395,10 @@ export function buildServer(
   // Export results as CSV or JSON
   app.get('/api/export/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
-    const query = req.query as { format?: string };
+    const query = req.query as ResultFilters & { format?: string };
     const format = query.format === 'csv' ? 'csv' : 'json';
 
-    const results = await repo.getJobResults(id);
+    const results = filterResults(await repo.getJobResults(id), query);
 
     if (format === 'csv') {
       const headers = [
@@ -373,19 +408,36 @@ export function buildServer(
         'Server Name',
         'Members',
         'Language',
+        'Country Code',
+        'Country Name',
+        'Country Status',
         'Topics',
         'Verified Date',
+        'Country Evidence URL',
+        'Country Evidence',
+        'Country Evidence Timestamp',
+        'Original Source URLs',
       ];
-      const rows = results.map((r) => [
-        r.score,
-        `"${r.invite.canonicalUrl}"`,
-        `"${r.invite.status}"`,
-        `"${(r.invite.community?.name || '').replace(/"/g, '""')}"`,
-        r.invite.community?.approximateMemberCount || 0,
-        `"${r.detectedLanguage}"`,
-        `"${r.detectedTopics.join(', ')}"`,
-        `"${r.invite.lastVerifiedAt}"`,
-      ]);
+      const rows = results.map((r) => {
+        const cEv = r.countryEvidence || r.invite.community?.countryEvidence;
+        return [
+          r.score,
+          r.invite.canonicalUrl,
+          r.invite.status,
+          r.invite.community?.name,
+          r.invite.community?.approximateMemberCount,
+          r.detectedLanguage,
+          cEv?.countryCode,
+          cEv?.countryName,
+          cEv?.status ?? 'unknown',
+          r.detectedTopics.join(', '),
+          r.invite.lastVerifiedAt,
+          cEv?.sourceUrl,
+          cEv?.supportingEvidence,
+          cEv?.lastVerifiedAt,
+          r.sources.map(({ sourceUrl }) => sourceUrl).filter(Boolean).join(' | '),
+        ].map(csvCell);
+      });
 
       const csvContent = [headers.join(','), ...rows.map((row) => row.join(','))].join('\n');
 

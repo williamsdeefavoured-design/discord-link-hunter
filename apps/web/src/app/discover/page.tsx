@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Compass, Sparkles, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Compass, Sparkles, AlertCircle, CheckCircle2, Globe2 } from 'lucide-react';
+import { DEFAULT_RESEARCH_SOURCES, getSelectableCountries } from '@discord-link-hunter/core';
 import { apiFetch } from '../../lib/api';
 
 const TOPICS = [
@@ -14,6 +15,9 @@ const TOPICS = [
   { id: 'options', name: 'Options Flow' },
   { id: 'indices', name: 'Indices (S&P 500, DAX)' },
   { id: 'day_trading', name: 'Day Trading & Scalping' },
+  { id: 'swing_trading', name: 'Swing Trading' },
+  { id: 'technical_analysis', name: 'Technical Analysis' },
+  { id: 'investing', name: 'Investing' },
   { id: 'education', name: 'Trading Education' },
 ];
 
@@ -24,18 +28,34 @@ const LANGUAGES = [
   { id: 'pt', name: 'Portuguese (pt)' },
   { id: 'fr', name: 'French (fr)' },
   { id: 'ar', name: 'Arabic (ar)' },
+  { id: 'it', name: 'Italian (it)' },
+  { id: 'tr', name: 'Turkish (tr)' },
+  { id: 'nl', name: 'Dutch (nl)' },
 ];
+
+const SELECTABLE_COUNTRIES = getSelectableCountries();
 
 export default function DiscoverPage() {
   const router = useRouter();
-  const [topic, setTopic] = useState('forex');
-  const [language, setLanguage] = useState('en');
+  const [topics, setTopics] = useState(['forex']);
+  const [languages, setLanguages] = useState(['en']);
+  const [targetPlatforms, setTargetPlatforms] = useState<string[]>([]);
+  const [country, setCountry] = useState('all');
+  const [countrySearch, setCountrySearch] = useState('');
   const [limit, setLimit] = useState(10);
   const depth = 1; // Stable standard search only.
   const mode = 'live' as const;
   const dryRun = false;
   const [loading, setLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string; jobId?: string } | null>(null);
+
+  const filteredCountries = useMemo(() => {
+    if (!countrySearch.trim()) return SELECTABLE_COUNTRIES;
+    const q = countrySearch.toLowerCase().trim();
+    return SELECTABLE_COUNTRIES.filter(
+      (c) => c.name.toLowerCase().includes(q) || c.code.toLowerCase().includes(q)
+    );
+  }, [countrySearch]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,8 +67,10 @@ export default function DiscoverPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          topics: [topic],
-          languages: [language],
+          topics,
+          targetPlatforms: targetPlatforms.length ? targetPlatforms : undefined,
+          languages,
+          country: country !== 'all' ? country : undefined,
           limit,
           depth,
           mode,
@@ -104,43 +126,90 @@ export default function DiscoverPage() {
           <strong className="text-[#d5eeee]">Live discovery enabled.</strong> Searches use Serper / Tavily research requests and the configured provider limits.
         </div>
 
-        {/* Topic Selector */}
+        {[
+          { title: 'Trading topics', options: TOPICS, selected: topics, setSelected: setTopics },
+          { title: 'Languages', options: LANGUAGES, selected: languages, setSelected: setLanguages },
+        ].map(({ title, options, selected, setSelected }) => (
+          <fieldset key={title} className="space-y-2">
+            <legend className="text-xs font-semibold text-slate-300 uppercase tracking-wider">{title}</legend>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {options.map(({ id, name }) => (
+                <label key={id} className="flex items-center gap-2 text-xs text-slate-300">
+                  <input type="checkbox" checked={selected.includes(id)} onChange={(event) => {
+                    const checked = event.target.checked;
+                    setSelected((current) => checked ? [...current, id] : current.filter((value) => value !== id));
+                  }} />
+                  {name}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        ))}
+
+        {/* Country Selector (Strict Evidence-Based, Non-African ISO Alpha-2) */}
         <div className="space-y-2">
-          <label htmlFor="topic" className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
-            Trading Sector / Topic
-          </label>
-          <select
-            id="topic"
-            value={topic}
-            onChange={(e) => setTopic(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
-          >
-            {TOPICS.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </select>
+          <div className="flex items-center justify-between">
+            <label htmlFor="country" className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+              Country Focus (Strict Evidence-Based)
+            </label>
+            <span className="text-[11px] text-slate-500 font-normal">
+              Non-African ISO Alpha-2
+            </span>
+          </div>
+          <div className="space-y-2">
+            <input
+              type="text"
+              aria-label="Search countries by name or ISO code"
+              placeholder="Filter country list by name or ISO code (e.g. Spain, DE, United Kingdom)..."
+              value={countrySearch}
+              onChange={(e) => setCountrySearch(e.target.value)}
+              className="w-full bg-slate-950/80 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+            />
+            <select
+              id="country"
+              value={country}
+              onChange={(e) => setCountry(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+            >
+              <option value="all">All Countries (Unrestricted)</option>
+              {filteredCountries
+                .filter((c) => c.code !== 'all')
+                .concat(filteredCountries.some((c) => c.code === country) || country === 'all' ? [] : SELECTABLE_COUNTRIES.filter((c) => c.code === country))
+                .map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.name} ({c.code})
+                  </option>
+                ))}
+            </select>
+          </div>
+          {country !== 'all' ? (
+            <p className="text-[11px] text-indigo-300/90 leading-relaxed">
+              Strict filter active: Communities need independently verified evidence or an explicit guild self-declaration for {SELECTABLE_COUNTRIES.find((c) => c.code === country)?.name || country}. Communities with unknown or differing countries are strictly excluded.
+            </p>
+          ) : (
+            <p className="text-[11px] text-slate-500">
+              Country filtering is off. African countries and communities with unknown locations can appear if they meet the other filters.
+            </p>
+          )}
         </div>
 
-        {/* Language Selector */}
-        <div className="space-y-2">
-          <label htmlFor="language" className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
-            Language Focus
-          </label>
-          <select
-            id="language"
-            value={language}
-            onChange={(e) => setLanguage(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
-          >
-            {LANGUAGES.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
+        <fieldset className="space-y-2">
+          <legend className="text-xs font-semibold text-slate-300 uppercase tracking-wider">Source platforms</legend>
+          <p className="text-xs text-slate-400">Leave all unchecked for unrestricted discovery. Searches cover indexed public pages, with coverage limited by each provider.</p>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {DEFAULT_RESEARCH_SOURCES.filter((source) => source.enabled).map((source) => (
+              <label key={source.id} className="flex items-center gap-2 text-xs text-slate-300">
+                <input type="checkbox" checked={targetPlatforms.includes(source.id)} onChange={(event) => {
+                  const checked = event.target.checked;
+                  setTargetPlatforms((current) => checked
+                    ? [...current, source.id]
+                    : current.filter((id) => id !== source.id));
+                }} />
+                {source.name}
+              </label>
             ))}
-          </select>
-        </div>
+          </div>
+        </fieldset>
 
         {/* Budget Controls */}
         <div className="grid grid-cols-1 gap-4">

@@ -1,5 +1,6 @@
 import {
   getDefaultSourceRegistry,
+  getCountryName,
   getSynonymsForTopic,
   LanguageCode,
   ResearchSourceConfig,
@@ -31,6 +32,7 @@ export class QueryPlanner {
     const languages = params.languages.length > 0 ? params.languages : (['en'] as LanguageCode[]);
     const targetPlatforms =
       params.targetPlatforms && params.targetPlatforms.length > 0 ? params.targetPlatforms : undefined;
+    const countryName = params.country && params.country !== 'all' ? getCountryName(params.country) : null;
 
     // Get active sources to consider
     const activeSources = this.sourceRegistry.getActiveSources(targetPlatforms);
@@ -38,7 +40,15 @@ export class QueryPlanner {
     // Build planned source targets based on budget and platform selection
     const targetsToUse: PlannedSourceTarget[] = [];
 
-    if (targetPlatforms) {
+    if (targetPlatforms && activeSources.length > this.maxQueries && this.maxQueries > 0) {
+      for (let index = 0; index < this.maxQueries; index++) {
+        const group = activeSources.filter((_, i) => i % this.maxQueries === index);
+        targetsToUse.push({
+          operator: '(' + group.map((source) => source.searchOperatorTemplate).join(' OR ') + ')',
+          platform: group.map((source) => source.id).join(','),
+        });
+      }
+    } else if (targetPlatforms) {
       // User explicitly requested specific platforms
       for (const src of activeSources) {
         targetsToUse.push({
@@ -56,9 +66,7 @@ export class QueryPlanner {
         });
       }
     } else {
-      // Compact budget mode (< 11 queries, e.g. 4 queries):
-      // Group the 10 platforms into compound queries using site: OR operators so that
-      // all 10 platform categories receive search coverage without exceeding the budget.
+      // Group indexed sources to preserve coverage within the query budget.
       targetsToUse.push({ operator: null, platform: 'general_web' });
       targetsToUse.push({
         operator: '(site:reddit.com OR site:x.com OR site:twitter.com)',
@@ -73,6 +81,14 @@ export class QueryPlanner {
           '(site:substack.com OR site:patreon.com OR site:medium.com OR site:quora.com OR site:wordpress.com)',
         platform: 'substack,patreon,medium,quora,trading_blogs',
       });
+      const directories = activeSources.filter((source) =>
+        ['disboard', 'discadia', 'top_gg', 'discord_me', 'discord_discovery'].includes(source.id));
+      if (directories.length) {
+        targetsToUse.push({
+          operator: '(' + directories.map((source) => source.searchOperatorTemplate).join(' OR ') + ')',
+          platform: directories.map((source) => source.id).join(','),
+        });
+      }
     }
 
     // Distribute across targets and synonyms without spending the entire query
@@ -86,39 +102,38 @@ export class QueryPlanner {
       education: 'trading education',
     };
 
-    for (const lang of languages) {
-      for (const topic of topics) {
-        const localized = getSynonymsForTopic(topic, lang);
-        const variants = Array.from(new Set([
-          localized[0], globalTopicTerm[topic], ...localized.slice(1, 4),
-        ].filter((value): value is string => Boolean(value))));
+    const combinations = languages.flatMap((language) => topics.map((topic) => {
+      const localized = getSynonymsForTopic(topic, language);
+      const variants = [...new Set([localized[0], globalTopicTerm[topic], ...localized.slice(1, 4)])]
+        .filter((value): value is string => Boolean(value));
+      return { language, topic, variants };
+    }));
+    const maxVariants = Math.max(...combinations.map(({ variants }) => variants.length));
 
-        // Each pass visits EVERY source category, with a different search term.
-        // A 4-query job therefore covers all 4 broad source groups and no more.
-        for (let round = 0; round < variants.length; round++) {
-          for (let targetIndex = 0; targetIndex < targetsToUse.length; targetIndex++) {
-            if (planned.length >= this.maxQueries) return planned;
-            const target = targetsToUse[targetIndex];
-            const synonym = variants[(round + targetIndex) % variants.length];
-            // Public posts often say "Discord" without printing the invite in
-            // indexed text; don't require "discord.gg/" for every platform.
-            const discordTerm = target.operator === null || targetIndex === 1
-              ? '"discord.gg/"'
-              : '"discord"';
-            const query = target.operator === null
-              ? `"${synonym}" ${discordTerm}`
-              : `${target.operator} "${synonym}" ${discordTerm}`;
-            if (seenQueries.has(query)) continue;
-            seenQueries.add(query);
-            planned.push({
-              query,
-              topic,
-              language: lang,
-              priority: planned.length + 1,
-              platform: target.platform,
-            });
-          }
-        }
+    for (let round = 0; round < combinations.length * maxVariants; round++) {
+      for (const [targetIndex, target] of targetsToUse.entries()) {
+        if (planned.length >= this.maxQueries) return planned;
+        const combination = combinations[(round + targetIndex) % combinations.length];
+        const variantIndex = Math.floor(round / combinations.length);
+        if (variantIndex >= combination.variants.length) continue;
+        const synonym = combination.variants[(variantIndex + targetIndex) % combination.variants.length];
+        const discordTerm = target.operator === null || (!targetPlatforms && targetIndex === 1)
+          ? '"discord.gg/"'
+          : '"discord"';
+        const countryTerm = countryName && (target.operator === null || round === 0)
+          ? ['"' + countryName + '"']
+          : [];
+        const query = [target.operator, '"' + synonym + '"', ...countryTerm, discordTerm].filter(Boolean).join(' ');
+        const key = combination.language + ':' + query;
+        if (seenQueries.has(key)) continue;
+        seenQueries.add(key);
+        planned.push({
+          query,
+          topic: combination.topic,
+          language: combination.language,
+          priority: planned.length + 1,
+          platform: target.platform,
+        });
       }
     }
 

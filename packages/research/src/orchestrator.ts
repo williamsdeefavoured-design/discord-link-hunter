@@ -11,6 +11,7 @@ import {
   verifyDiscordInvite,
   detectTopicsFromText,
   detectLanguageEvidence,
+  getCountryName,
 } from '@discord-link-hunter/core';
 import { QueryPlanner } from './query-planner.js';
 import { QueryPlanItem, SearchProvider } from './types.js';
@@ -34,6 +35,7 @@ export interface OrchestrationResult {
   estimatedCredits?: number;
   dryRunExplanation?: string;
   languageFilterNotice?: string;
+  countryFilterNotice?: string;
   providerUsage?: Record<string, number>;
 }
 
@@ -81,7 +83,7 @@ export class SearchOrchestrator {
     };
 
     if (params.dryRun) {
-      const estimatedRequests = plan.length + (params.depth > 1 ? 3 : 0);
+      const estimatedRequests = plan.length + (params.depth > 1 && !params.targetPlatforms?.length ? 3 : 0);
       const estimatedCredits = estimatedRequests;
       const dryRunExplanation =
         'Dry Run generated the multilingual query strategy without dispatching external network requests. ' +
@@ -109,6 +111,13 @@ export class SearchOrchestrator {
     };
 
     let primaryDisabled = false;
+    const sourceAllowed = (url: string) => {
+      if (!params.targetPlatforms?.length) return true;
+      if (!/^https?:\/\//i.test(url)) return false;
+      const id = identifySourcePlatform(url)?.id;
+      return Boolean(id && params.targetPlatforms.includes(id) &&
+        (id !== 'discord_discovery' || /^https?:\/\/(?:www\.)?discord\.com\/servers(?:[/?#]|$)/i.test(url)));
+    };
 
     // Execute queries in bounded concurrent batches
     for (let i = 0; i < plan.length; i += this.maxConcurrent) {
@@ -182,6 +191,8 @@ export class SearchOrchestrator {
 
             // Extract invites from search snippets and links
             for (const itemResult of searchResult.items) {
+              const sourcePlatform = identifySourcePlatform(itemResult.url);
+              if (!sourceAllowed(itemResult.url)) continue;
               const combinedText = `${itemResult.title}\n${itemResult.snippet}\n${itemResult.url}`;
               const extracted = extractDiscordInvites(combinedText, itemResult.url, searchResult.provider);
 
@@ -197,7 +208,7 @@ export class SearchOrchestrator {
                 // Collect discovered public discussions as potential community leads without confirmed invites.
                 if (itemResult.url && !seenLeadUrls.has(itemResult.url)) {
                   seenLeadUrls.add(itemResult.url);
-                  const platformConfig = identifySourcePlatform(itemResult.url);
+                  const platformConfig = sourcePlatform;
                   const platformId = platformConfig?.id || 'general_web';
                   const platformName = platformConfig?.name || 'General Web';
                   const category = platformConfig?.category || 'general_web';
@@ -259,7 +270,7 @@ export class SearchOrchestrator {
     }
 
     // Secondary expansion via Tavily if requested and depth > 1
-    if (params.depth > 1 && this.secondaryProvider?.isAvailable()) {
+    if (params.depth > 1 && !params.targetPlatforms?.length && this.secondaryProvider?.isAvailable()) {
       const topInvites = Array.from(discoveredInvitesMap.entries()).slice(0, 3);
       for (const [code] of topInvites) {
         try {
@@ -308,9 +319,26 @@ export class SearchOrchestrator {
     }
     entries.sort((a, b) => candidatePriority(b[1]) - candidatePriority(a[1]));
 
-    // Keep the existing bounded Discord verification budget; use it smarter,
-    // without increasing paid search-provider queries or verification load.
-    const targetCodes = entries.slice(0, Math.min(params.limit * 2, entries.length));
+    // Keep the initial verification budget. Check an additional bounded set
+    // only when the strict, deduplicated results are still below the limit.
+    const initialBudget = params.limit * 2;
+    const verificationBudget = Math.max(initialBudget, Math.min(params.limit * 4, 60));
+    const targetCodes = entries.slice(0, verificationBudget);
+    let countryExcludedCount = 0;
+    let relevanceExcludedCount = 0;
+    const rankCandidates = () => {
+      countryExcludedCount = 0;
+      relevanceExcludedCount = 0;
+      return rankInviteResults(verifiedList.filter(({ invite }) => {
+        if (!params.minMembers) return true;
+        const count = invite.community?.approximateMemberCount;
+        return count != null && count >= params.minMembers;
+      }), params.topics, params.languages, {
+        country: params.country,
+        onCountryRejected: () => { countryExcludedCount++; },
+        onRelevanceRejected: () => { relevanceExcludedCount++; },
+      });
+    };
 
     for (const [code, sources] of targetCodes) {
       try {
@@ -319,25 +347,14 @@ export class SearchOrchestrator {
         progress.invitesVerified = progress.invitesChecked;
 
         if (verified.status === 'valid') {
-          // If minMembers filter requested, check threshold
-          if (params.minMembers && verified.community?.approximateMemberCount) {
-            if (verified.community.approximateMemberCount >= params.minMembers) {
-              progress.validInvites++;
-              progress.validInvitesFound = progress.validInvites;
-              verifiedList.push({ invite: verified, sources });
-            } else {
-              progress.restrictedOrUnverified++;
-              verifiedList.push({ invite: verified, sources });
-            }
-          } else {
-            progress.validInvites++;
-            progress.validInvitesFound = progress.validInvites;
-            verifiedList.push({ invite: verified, sources });
-          }
+          progress.validInvites++;
+          progress.validInvitesFound = progress.validInvites;
+          verifiedList.push({ invite: verified, sources });
         } else if (verified.status === 'expired_or_revoked') {
           progress.invalidInvites++;
           verifiedList.push({ invite: verified, sources });
         } else {
+          progress.discordVerificationRateLimited = verified.status === 'rate_limited';
           progress.restrictedOrUnverified++;
           verifiedList.push({ invite: verified, sources });
         }
@@ -358,10 +375,15 @@ export class SearchOrchestrator {
       }
 
       if (onProgress) onProgress({ ...progress });
+      if (progress.discordVerificationRateLimited) break;
+      if (progress.invitesChecked >= initialBudget && progress.invitesChecked % params.limit === 0) {
+        const ranked = rankCandidates();
+        if (ranked.filter(({ invite }) => invite.status === 'valid').length >= params.limit) break;
+      }
     }
 
-    // Rank verified results with strict language relevance
-    const ranked = rankInviteResults(verifiedList, params.topics, params.languages);
+    progress.uncheckedInvites = entries.length - progress.invitesChecked;
+    const ranked = rankCandidates();
     for (const r of ranked) {
       if (this.isSimulated) {
         r.isSimulated = true;
@@ -371,15 +393,14 @@ export class SearchOrchestrator {
     const finalResults = ranked.slice(0, params.limit);
 
     let languageFilterNotice: string | undefined;
+    let countryFilterNotice: string | undefined;
     const hasTopics = Boolean(params.topics && params.topics.length > 0);
     const hasLanguages = Boolean(params.languages && params.languages.length > 0);
+    const hasCountry = Boolean(params.country && params.country !== 'all');
 
     if (hasTopics || hasLanguages) {
-      const validVerifiedCount = verifiedList.filter((v) => v.invite.status === 'valid').length;
       const validMatchingCount = finalResults.filter((r) => r.invite.status === 'valid').length;
-      const totalEligibleValidCount = ranked.filter((r) => r.invite.status === 'valid').length;
-      // Exclusion only means failed relevance, not omitted due to the result limit.
-      const excludedCount = Math.max(0, validVerifiedCount - totalEligibleValidCount);
+      const excludedCount = relevanceExcludedCount;
       progress.languageFilteredOutCount = excludedCount;
 
       if (finalResults.length < params.limit && excludedCount > 0) {
@@ -396,11 +417,21 @@ export class SearchOrchestrator {
       }
     }
 
+    if (hasCountry) {
+      const countryCode = params.country!.toUpperCase();
+      const countryName = getCountryName(countryCode) || countryCode;
+      const validMatchingCount = finalResults.filter((r) => r.invite.status === 'valid').length;
+      progress.countryFilteredOutCount = countryExcludedCount;
+
+      countryFilterNotice = `Country filter for ${countryName} (${countryCode}). ${validMatchingCount} active matches shown. ${countryExcludedCount} otherwise relevant communities had unknown or different country evidence. Explicit community self-declarations qualify.`;
+    }
+
     return {
       results: finalResults,
       progress,
       potentialLeads,
       languageFilterNotice,
+      countryFilterNotice,
       providerUsage,
     };
   }
