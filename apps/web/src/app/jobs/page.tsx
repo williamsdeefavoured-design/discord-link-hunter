@@ -370,7 +370,7 @@ export default function JobsPage() {
 
                 {job.progress.qualifiedCommunities !== undefined && (
                   <p className="text-xs text-slate-400">
-                    {job.progress.sourceHits} search hits across queries · {job.progress.qualifiedCommunities} active communities met your filters · {job.progress.uncheckedInvites ?? 0} invites unchecked
+                    {job.progress.sourceHits} search hits across queries · {job.progress.qualifiedCommunities} active communities matched your preferences · {job.progress.broadMatchesShown ?? 0} broader results · {job.progress.uncheckedInvites ?? 0} invites unchecked
                   </p>
                 )}
 

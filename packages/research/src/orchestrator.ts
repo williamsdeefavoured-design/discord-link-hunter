@@ -23,6 +23,7 @@ export interface SearchOrchestratorOptions {
   maxConcurrent?: number;
   verifyInviteFn?: (code: string) => Promise<VerifiedInvite>;
   isSimulated?: boolean;
+  includeBroadMatches?: boolean;
 }
 
 export interface OrchestrationResult {
@@ -46,6 +47,7 @@ export class SearchOrchestrator {
   private maxConcurrent: number;
   private verifyInviteFn: (code: string) => Promise<VerifiedInvite>;
   private isSimulated: boolean;
+  private includeBroadMatches: boolean;
 
   constructor(options: SearchOrchestratorOptions) {
     this.primaryProvider = options.primaryProvider;
@@ -53,6 +55,7 @@ export class SearchOrchestrator {
     this.queryPlanner = options.queryPlanner || new QueryPlanner();
     this.maxConcurrent = options.maxConcurrent || 2;
     this.verifyInviteFn = options.verifyInviteFn || verifyDiscordInvite;
+    this.includeBroadMatches = options.includeBroadMatches ?? false;
     this.isSimulated = options.isSimulated ?? (options.primaryProvider.name === 'mock');
   }
 
@@ -61,7 +64,7 @@ export class SearchOrchestrator {
     onProgress?: (progress: SearchJobProgress) => void | Promise<void>
   ): Promise<OrchestrationResult> {
     const plan = this.queryPlanner.generatePlan(params);
-    const wideningBudget = params.depth === 1 && plan.length > 0 ? Math.min(6, plan.length) : 0;
+    const wideningBudget = params.depth === 1 && plan.length > 0 ? (this.includeBroadMatches ? 12 : Math.min(6, plan.length)) : 0;
     const plannedKeys = new Set(plan.map(({ language, query }) => language + ':' + query));
     const widerPlan = wideningBudget ? this.queryPlanner.generatePlan(params, plan.length + wideningBudget)
       .filter(({ language, query }) => !plannedKeys.has(language + ':' + query))
@@ -428,7 +431,24 @@ export class SearchOrchestrator {
       await checkInvites(verificationBudget - progress.invitesChecked);
     }
     progress.uncheckedInvites = discoveredInvitesMap.size - progress.invitesChecked;
-    const ranked = rankCandidates();
+    const strictMatches = rankCandidates();
+    const strictActive = strictMatches.filter(({ invite }) => invite.status === 'valid');
+    let ranked = strictMatches;
+    if (this.includeBroadMatches) {
+      const identity = ({ invite }: RankedInviteResult) =>
+        invite.community?.id ? 'guild:' + invite.community.id : 'invite:' + invite.code;
+      const matched = new Set(strictActive.map(identity));
+      for (const result of strictActive) result.scoreBreakdown.preferenceMatch = true;
+      const broad = rankInviteResults(verifiedList.filter(({ invite }) =>
+        !params.minMembers || (invite.community?.approximateMemberCount ?? -1) >= params.minMembers
+      ), params.topics, params.languages, { strictFilter: false });
+      for (const result of broad) result.scoreBreakdown.preferenceMatch = matched.has(identity(result));
+      ranked = [
+        ...strictActive,
+        ...broad.filter((result) => result.invite.status === 'valid' && !matched.has(identity(result))),
+        ...broad.filter(({ invite }) => invite.status !== 'valid'),
+      ];
+    }
     for (const r of ranked) {
       if (this.isSimulated) {
         r.isSimulated = true;
@@ -436,8 +456,11 @@ export class SearchOrchestrator {
     }
 
     const finalResults = ranked.slice(0, params.limit);
-    progress.qualifiedCommunities = ranked.filter(({ invite }) => invite.status === 'valid').length;
-    if (params.country && params.country.toLowerCase() !== 'all') {
+    progress.qualifiedCommunities = strictActive.length;
+    if (this.includeBroadMatches) {
+      progress.broadMatchesShown = Math.max(0, finalResults.filter(({ invite }) => invite.status === 'valid').length - strictActive.length);
+    }
+    if (!this.includeBroadMatches && params.country && params.country.toLowerCase() !== 'all') {
       progress.countryUnconfirmed = rankInviteResults(verifiedList.filter(({ invite }) =>
         invite.status === 'valid' && (!params.minMembers ||
           (invite.community?.approximateMemberCount ?? -1) >= params.minMembers),
@@ -454,7 +477,11 @@ export class SearchOrchestrator {
     const hasLanguages = Boolean(params.languages && params.languages.length > 0);
     const hasCountry = Boolean(params.country && params.country !== 'all');
 
-    if (hasTopics || hasLanguages) {
+    if (this.includeBroadMatches) {
+      if (progress.broadMatchesShown) {
+        languageFilterNotice = `Showing ${progress.broadMatchesShown} additional active communities. Topic, language, or country may differ from your search or be unconfirmed.`;
+      }
+    } else if (hasTopics || hasLanguages) {
       const validMatchingCount = finalResults.filter((r) => r.invite.status === 'valid').length;
       const excludedCount = relevanceExcludedCount;
       progress.languageFilteredOutCount = excludedCount;
@@ -473,7 +500,7 @@ export class SearchOrchestrator {
       }
     }
 
-    if (hasCountry) {
+    if (hasCountry && !this.includeBroadMatches) {
       const countryCode = params.country!.toUpperCase();
       const countryName = getCountryName(countryCode) || countryCode;
       const validMatchingCount = finalResults.filter((r) => r.invite.status === 'valid').length;
