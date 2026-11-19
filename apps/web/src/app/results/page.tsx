@@ -366,6 +366,15 @@ function ResultsContent() {
         </div>
       </div>
 
+      {job?.progress?.uncheckedInvites > 0 && (
+        <p className="text-xs text-slate-400">
+          Checked {job.progress.invitesChecked} of {job.progress.uniqueInvites} distinct invites.
+          {job.progress.discordVerificationRateLimited
+            ? ' Discord rate-limited verification, so the remaining invites were left unchecked.'
+            : ' The remaining invites were left unchecked.'}
+        </p>
+      )}
+
       {/* Results Table */}
       {loading ? (
         <div className="p-12 text-center text-slate-500 text-sm">Loading results...</div>
@@ -375,7 +384,7 @@ function ResultsContent() {
           <h2 className="text-xl font-semibold text-[#e6eff5]">No communities meet these conditions.</h2>
           <p className="max-w-[540px] mx-auto text-sm text-[#9aafc1] leading-relaxed">
             {activeStoredCount === 0
-              ? 'The research job has no stored active invitations that passed its relevance checks. This is not a connection failure.'
+              ? 'No active invitations passed all of this job’s discovery filters.'
               : 'Some stored invitations are active, but your current score, language, or platform filters hide them.'}
           </p>
           {job?.progress?.validInvitesFound > 0 && (

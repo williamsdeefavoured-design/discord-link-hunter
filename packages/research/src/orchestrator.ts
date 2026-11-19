@@ -83,7 +83,7 @@ export class SearchOrchestrator {
     };
 
     if (params.dryRun) {
-      const estimatedRequests = plan.length + (params.depth > 1 ? 3 : 0);
+      const estimatedRequests = plan.length + (params.depth > 1 && !params.targetPlatforms?.length ? 3 : 0);
       const estimatedCredits = estimatedRequests;
       const dryRunExplanation =
         'Dry Run generated the multilingual query strategy without dispatching external network requests. ' +
@@ -111,6 +111,13 @@ export class SearchOrchestrator {
     };
 
     let primaryDisabled = false;
+    const sourceAllowed = (url: string) => {
+      if (!params.targetPlatforms?.length) return true;
+      if (!/^https?:\/\//i.test(url)) return false;
+      const id = identifySourcePlatform(url)?.id;
+      return Boolean(id && params.targetPlatforms.includes(id) &&
+        (id !== 'discord_discovery' || /^https?:\/\/(?:www\.)?discord\.com\/servers(?:[/?#]|$)/i.test(url)));
+    };
 
     // Execute queries in bounded concurrent batches
     for (let i = 0; i < plan.length; i += this.maxConcurrent) {
@@ -185,11 +192,7 @@ export class SearchOrchestrator {
             // Extract invites from search snippets and links
             for (const itemResult of searchResult.items) {
               const sourcePlatform = identifySourcePlatform(itemResult.url);
-              if (params.targetPlatforms?.length &&
-                  (!/^https?:\/\//i.test(itemResult.url) || !sourcePlatform || !params.targetPlatforms.includes(sourcePlatform.id) ||
-                   (sourcePlatform.id === 'discord_discovery' && !/^https?:\/\/(?:www\.)?discord\.com\/servers(?:[/?#]|$)/i.test(itemResult.url)))) {
-                continue;
-              }
+              if (!sourceAllowed(itemResult.url)) continue;
               const combinedText = `${itemResult.title}\n${itemResult.snippet}\n${itemResult.url}`;
               const extracted = extractDiscordInvites(combinedText, itemResult.url, searchResult.provider);
 
@@ -267,7 +270,7 @@ export class SearchOrchestrator {
     }
 
     // Secondary expansion via Tavily if requested and depth > 1
-    if (params.depth > 1 && this.secondaryProvider?.isAvailable()) {
+    if (params.depth > 1 && !params.targetPlatforms?.length && this.secondaryProvider?.isAvailable()) {
       const topInvites = Array.from(discoveredInvitesMap.entries()).slice(0, 3);
       for (const [code] of topInvites) {
         try {
@@ -316,9 +319,26 @@ export class SearchOrchestrator {
     }
     entries.sort((a, b) => candidatePriority(b[1]) - candidatePriority(a[1]));
 
-    // Keep the existing bounded Discord verification budget; use it smarter,
-    // without increasing paid search-provider queries or verification load.
-    const targetCodes = entries.slice(0, Math.min(params.limit * 2, entries.length));
+    // Keep the initial verification budget. Check an additional bounded set
+    // only when the strict, deduplicated results are still below the limit.
+    const initialBudget = params.limit * 2;
+    const verificationBudget = Math.max(initialBudget, Math.min(params.limit * 4, 60));
+    const targetCodes = entries.slice(0, verificationBudget);
+    let countryExcludedCount = 0;
+    let relevanceExcludedCount = 0;
+    const rankCandidates = () => {
+      countryExcludedCount = 0;
+      relevanceExcludedCount = 0;
+      return rankInviteResults(verifiedList.filter(({ invite }) => {
+        if (!params.minMembers) return true;
+        const count = invite.community?.approximateMemberCount;
+        return count != null && count >= params.minMembers;
+      }), params.topics, params.languages, {
+        country: params.country,
+        onCountryRejected: () => { countryExcludedCount++; },
+        onRelevanceRejected: () => { relevanceExcludedCount++; },
+      });
+    };
 
     for (const [code, sources] of targetCodes) {
       try {
@@ -334,6 +354,7 @@ export class SearchOrchestrator {
           progress.invalidInvites++;
           verifiedList.push({ invite: verified, sources });
         } else {
+          progress.discordVerificationRateLimited = verified.status === 'rate_limited';
           progress.restrictedOrUnverified++;
           verifiedList.push({ invite: verified, sources });
         }
@@ -354,21 +375,15 @@ export class SearchOrchestrator {
       }
 
       if (onProgress) onProgress({ ...progress });
+      if (progress.discordVerificationRateLimited) break;
+      if (progress.invitesChecked >= initialBudget && progress.invitesChecked % params.limit === 0) {
+        const ranked = rankCandidates();
+        if (ranked.filter(({ invite }) => invite.status === 'valid').length >= params.limit) break;
+      }
     }
 
-    // Rank verified results with strict language and country relevance
-    const eligibleByMembership = verifiedList.filter(({ invite }) => {
-      if (!params.minMembers) return true;
-      const count = invite.community?.approximateMemberCount;
-      return count != null && count >= params.minMembers;
-    });
-    let countryExcludedCount = 0;
-    let relevanceExcludedCount = 0;
-    const ranked = rankInviteResults(eligibleByMembership, params.topics, params.languages, {
-      country: params.country,
-      onCountryRejected: () => { countryExcludedCount++; },
-      onRelevanceRejected: () => { relevanceExcludedCount++; },
-    });
+    progress.uncheckedInvites = entries.length - progress.invitesChecked;
+    const ranked = rankCandidates();
     for (const r of ranked) {
       if (this.isSimulated) {
         r.isSimulated = true;

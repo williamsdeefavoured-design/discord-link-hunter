@@ -91,3 +91,48 @@ describe('Exact discovery source and membership constraints', () => {
     expect([...new Set(output.results[0].sources.map((source) => source.sourceUrl))].sort()).toEqual([...expected].sort());
   });
 });
+
+describe('Bounded verification when early invites fail relevance', () => {
+  const codes = ['first', 'second', 'third', 'fourth', 'fifth'];
+  const params = { topics: ['indices'] as const, languages: ['pt'] as const, limit: 1, depth: 1 };
+  function makeSearch(verifyInviteFn: (code: string) => Promise<VerifiedInvite>) {
+    const search = vi.fn(async (query: string) => ({
+      provider: 'serper' as const, query, statusCode: 200, durationMs: 1,
+      items: [{
+        url: 'https://reddit.com/r/markets/comments/example',
+        title: 'Discord communities',
+        snippet: codes.map((code) => 'https://discord.gg/' + code).join(' '),
+      }],
+    }));
+    return new SearchOrchestrator({
+      primaryProvider: { name: 'serper', search, isAvailable: () => true, getDailyRequestCount: () => 0 },
+      verifyInviteFn,
+    }).executeJob({ ...params, topics: [...params.topics], languages: [...params.languages] });
+  }
+
+  it('looks beyond the first two checks and keeps the topic and language filters', async () => {
+    const verify = vi.fn(async (code: string) => invite(code, code === 'third'
+      ? 'Bem vindos à nossa comunidade de investidores. Análise e operações de mini índice.'
+      : 'Welcome to our stock market discussion.'));
+    const result = await makeSearch(verify);
+
+    expect(result.results.map(({ invite }) => invite.code)).toEqual(['third']);
+    expect(result.progress).toMatchObject({ invitesChecked: 3, uncheckedInvites: 2, languageFilteredOutCount: 2 });
+    expect(verify).toHaveBeenCalledTimes(3);
+  });
+
+  it('caps additional checks when none of the invites qualify', async () => {
+    const result = await makeSearch(async (code) => invite(code, 'Welcome to our stock market discussion.'));
+
+    expect(result.results).toEqual([]);
+    expect(result.progress).toMatchObject({ invitesChecked: 4, uncheckedInvites: 1 });
+  });
+
+  it('stops when Discord reports a verification rate limit', async () => {
+    const result = await makeSearch(async (code) => ({
+      ...invite(code, 'Welcome to our stock market discussion.'), status: 'rate_limited',
+    }));
+
+    expect(result.progress).toMatchObject({ invitesChecked: 1, uncheckedInvites: 4, discordVerificationRateLimited: true });
+  });
+});

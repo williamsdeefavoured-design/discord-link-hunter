@@ -196,6 +196,8 @@ export interface SearchJobProgress {
   restrictedOrUnverified: number;
   languageFilteredOutCount?: number;
   countryFilteredOutCount?: number;
+  uncheckedInvites?: number;
+  discordVerificationRateLimited?: boolean;
   potentialLeadsCount?: number;
   leadsWithoutInvite?: number;
   // Backwards compatibility aliases:

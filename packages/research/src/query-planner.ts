@@ -66,9 +66,7 @@ export class QueryPlanner {
         });
       }
     } else {
-      // Compact budget mode (< 11 queries, e.g. 4 queries):
-      // Group the 10 platforms into compound queries using site: OR operators so that
-      // all 10 platform categories receive search coverage without exceeding the budget.
+      // Group indexed sources to preserve coverage within the query budget.
       targetsToUse.push({ operator: null, platform: 'general_web' });
       targetsToUse.push({
         operator: '(site:reddit.com OR site:x.com OR site:twitter.com)',
@@ -83,6 +81,14 @@ export class QueryPlanner {
           '(site:substack.com OR site:patreon.com OR site:medium.com OR site:quora.com OR site:wordpress.com)',
         platform: 'substack,patreon,medium,quora,trading_blogs',
       });
+      const directories = activeSources.filter((source) =>
+        ['disboard', 'discadia', 'top_gg', 'discord_me', 'discord_discovery'].includes(source.id));
+      if (directories.length) {
+        targetsToUse.push({
+          operator: '(' + directories.map((source) => source.searchOperatorTemplate).join(' OR ') + ')',
+          platform: directories.map((source) => source.id).join(','),
+        });
+      }
     }
 
     // Distribute across targets and synonyms without spending the entire query
