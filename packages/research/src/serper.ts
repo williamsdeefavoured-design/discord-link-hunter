@@ -42,6 +42,9 @@ export class SerperAdapter implements SearchProvider {
       pt: { gl: 'br', hl: 'pt' },
       fr: { gl: 'fr', hl: 'fr' },
       ar: { gl: 'sa', hl: 'ar' },
+      it: { gl: 'it', hl: 'it' },
+      tr: { gl: 'tr', hl: 'tr' },
+      nl: { gl: 'nl', hl: 'nl' },
     };
 
     const locale = (options.language && langMap[options.language]) || { gl: 'us', hl: 'en' };
@@ -55,7 +58,7 @@ export class SerperAdapter implements SearchProvider {
         },
         body: JSON.stringify({
           q: query,
-          gl: locale.gl,
+          gl: options.country && /^[a-z]{2}$/i.test(options.country) ? options.country.toLowerCase() : locale.gl,
           hl: locale.hl,
           num: limit,
         }),

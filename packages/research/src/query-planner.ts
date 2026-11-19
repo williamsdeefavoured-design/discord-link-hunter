@@ -117,10 +117,10 @@ export class QueryPlanner {
         const variantIndex = Math.floor(round / combinations.length);
         if (variantIndex >= combination.variants.length) continue;
         const synonym = combination.variants[(variantIndex + targetIndex) % combination.variants.length];
-        const discordTerm = target.operator === null || (!targetPlatforms && targetIndex === 1)
-          ? '"discord.gg/"'
+        const discordTerm = target.operator === null && round === 0
+          ? '(site:discord.gg OR site:discord.com/invite)'
           : '"discord"';
-        const countryTerm = countryName && (target.operator === null || round === 0)
+        const countryTerm = countryName && (target.operator === null || round === 0 || round % 2 === 0)
           ? ['"' + countryName + '"']
           : [];
         const query = [target.operator, '"' + synonym + '"', ...countryTerm, discordTerm].filter(Boolean).join(' ');
