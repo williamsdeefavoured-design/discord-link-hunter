@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { detectCountryEvidence, detectLanguageEvidence, getSelectableCountries, matchesCountryFilter, rankInviteResults, type VerifiedInvite } from '../packages/core/src/index.js';
+import { QueryPlanner } from '../packages/research/src/query-planner.js';
 import { SearchOrchestrator } from '../packages/research/src/orchestrator.js';
 
 const inviteUrl = 'https://discord.gg/fixture';
@@ -139,4 +140,28 @@ describe('Bounded verification when early invites fail relevance', () => {
 
     expect(result.progress).toMatchObject({ invitesChecked: 1, uncheckedInvites: 4, discordVerificationRateLimited: true });
   });
+});
+
+it('widens a regional search and keeps unconfirmed matches separate', async () => {
+  const search = vi.fn(async (query: string) => ({
+    provider: 'serper' as const, query, statusCode: 200, durationMs: 1,
+    items: [{
+      url: 'https://reddit.com/r/markets/comments/' + search.mock.calls.length,
+      title: 'Discord community',
+      snippet: 'https://discord.gg/' + (search.mock.calls.length === 1 ? 'unknown' : 'france'),
+    }],
+  }));
+  const stages: string[] = [];
+  const output = await new SearchOrchestrator({
+    primaryProvider: { name: 'serper', search, isAvailable: () => true, getDailyRequestCount: () => 0 },
+    queryPlanner: new QueryPlanner(1),
+    verifyInviteFn: async (code) => invite(code, 'Welcome to our stock market discussion. ' +
+      (code === 'france' ? 'We are based in France.' : '')),
+  }).executeJob({ topics: ['stocks'], languages: ['en'], country: 'FR', limit: 1, depth: 1 }, (progress) => {
+    if (progress.stage) stages.push(progress.stage);
+  });
+  expect(search).toHaveBeenCalledTimes(2);
+  expect(output.results.map(({ invite }) => invite.code)).toEqual(['france']);
+  expect(output.progress.countryUnconfirmed?.map(({ invite }) => invite.code)).toEqual(['unknown']);
+  expect([...new Set(stages)]).toEqual(['searching', 'widening', 'verifying', 'saving']);
 });

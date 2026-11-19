@@ -58,9 +58,14 @@ export class SearchOrchestrator {
 
   async executeJob(
     params: SearchJobParams,
-    onProgress?: (progress: SearchJobProgress) => void
+    onProgress?: (progress: SearchJobProgress) => void | Promise<void>
   ): Promise<OrchestrationResult> {
     const plan = this.queryPlanner.generatePlan(params);
+    const wideningBudget = params.depth === 1 && plan.length > 0 ? Math.min(6, plan.length) : 0;
+    const plannedKeys = new Set(plan.map(({ language, query }) => language + ':' + query));
+    const widerPlan = wideningBudget ? this.queryPlanner.generatePlan(params, plan.length + wideningBudget)
+      .filter(({ language, query }) => !plannedKeys.has(language + ':' + query))
+      .slice(0, wideningBudget) : [];
 
     const progress: SearchJobProgress = {
       queriesPlanned: plan.length,
@@ -85,7 +90,7 @@ export class SearchOrchestrator {
     };
 
     if (params.dryRun) {
-      const estimatedRequests = plan.length + (params.depth > 1 && !params.targetPlatforms?.length ? 3 : 0);
+      const estimatedRequests = plan.length + widerPlan.length + (params.depth > 1 && !params.targetPlatforms?.length ? 3 : 0);
       const estimatedCredits = estimatedRequests;
       const dryRunExplanation =
         'Dry Run generated the multilingual query strategy without dispatching external network requests. ' +
@@ -96,7 +101,7 @@ export class SearchOrchestrator {
         results: [],
         progress,
         dryRun: true,
-        plannedQueries: plan,
+        plannedQueries: [...plan, ...widerPlan.map((item, index) => ({ ...item, priority: plan.length + index + 1 }))],
         estimatedRequests,
         estimatedCredits,
         dryRunExplanation,
@@ -127,155 +132,168 @@ export class SearchOrchestrator {
     };
 
     // Execute queries in bounded concurrent batches
-    for (let i = 0; i < plan.length; i += this.maxConcurrent) {
-      const batch = plan.slice(i, i + this.maxConcurrent);
+    const runQueries = async (queries: QueryPlanItem[]) => {
+      for (let i = 0; i < queries.length; i += this.maxConcurrent) {
+        const batch = queries.slice(i, i + this.maxConcurrent);
 
-      await Promise.all(
-        batch.map(async (item) => {
-          progress.queriesAttempted++;
-          progress.queriesExecuted = progress.queriesAttempted;
+        await Promise.all(
+          batch.map(async (item) => {
+            progress.queriesAttempted++;
+            progress.queriesExecuted = progress.queriesAttempted;
 
-          try {
-            let searchResult: any = null;
+            try {
+              let searchResult: any = null;
 
-            // Attempt primary provider if available and not permanently broken
-            if (!primaryDisabled && this.primaryProvider.isAvailable()) {
-              providerUsage[this.primaryProvider.name] = (providerUsage[this.primaryProvider.name] || 0) + 1;
-              searchResult = await this.primaryProvider.search(item.query, {
-                language: item.language,
-                country: params.country,
-                depth: params.depth,
-              });
+              // Attempt primary provider if available and not permanently broken
+              if (!primaryDisabled && this.primaryProvider.isAvailable()) {
+                providerUsage[this.primaryProvider.name] = (providerUsage[this.primaryProvider.name] || 0) + 1;
+                searchResult = await this.primaryProvider.search(item.query, {
+                  language: item.language,
+                  country: params.country,
+                  depth: params.depth,
+                });
 
-              if (searchResult?.isPermanentError) {
-                primaryDisabled = true;
+                if (searchResult?.isPermanentError) {
+                  primaryDisabled = true;
+                }
               }
-            }
 
-            // Automatic Failover:
-            // If primary failed, was unavailable, or returned 0 items, failover to secondary provider
-            const primaryFailed = !searchResult || searchResult.statusCode !== 200 || searchResult.items.length === 0;
-            if (primaryFailed && this.secondaryProvider?.isAvailable()) {
-              if (searchResult?.error) {
-                progress.providerErrors.push({
-                  provider: this.primaryProvider.name,
-                  error: searchResult.error,
-                  timestamp: new Date().toISOString(),
+              // Automatic Failover:
+              // If primary failed, was unavailable, or returned 0 items, failover to secondary provider
+              const primaryFailed = !searchResult || searchResult.statusCode !== 200 || searchResult.items.length === 0;
+              if (primaryFailed && this.secondaryProvider?.isAvailable()) {
+                if (searchResult?.error) {
+                  progress.providerErrors.push({
+                    provider: this.primaryProvider.name,
+                    error: searchResult.error,
+                    timestamp: new Date().toISOString(),
+                  });
+                }
+
+                providerUsage[this.secondaryProvider.name] = (providerUsage[this.secondaryProvider.name] || 0) + 1;
+                searchResult = await this.secondaryProvider.search(item.query, {
+                  language: item.language,
+                  country: params.country,
+                  depth: params.depth,
                 });
               }
 
-              providerUsage[this.secondaryProvider.name] = (providerUsage[this.secondaryProvider.name] || 0) + 1;
-              searchResult = await this.secondaryProvider.search(item.query, {
-                language: item.language,
-                country: params.country,
-                depth: params.depth,
-              });
-            }
+              if (!searchResult) {
+                progress.queriesFailed++;
+                progress.providerErrors.push({
+                  provider: this.primaryProvider.name,
+                  error: 'No research provider was available to execute this query',
+                  timestamp: new Date().toISOString(),
+                });
+                  return;
+              }
 
-            if (!searchResult) {
-              progress.queriesFailed++;
-              progress.providerErrors.push({
-                provider: this.primaryProvider.name,
-                error: 'No research provider was available to execute this query',
-                timestamp: new Date().toISOString(),
-              });
-              if (onProgress) onProgress({ ...progress });
-              return;
-            }
-
-            if (searchResult.error || searchResult.statusCode !== 200) {
-              progress.queriesFailed++;
-              progress.providerErrors.push({
-                provider: searchResult.provider,
-                error: searchResult.error || `HTTP ${searchResult.statusCode}`,
-                timestamp: new Date().toISOString(),
-              });
-            } else {
-              progress.queriesSuccessful++;
-            }
-
-            progress.sourceHits = (progress.sourceHits ?? 0) + searchResult.items.length;
-
-            // Extract invites from search snippets and links
-            for (const itemResult of searchResult.items) {
-              const sourcePlatform = identifySourcePlatform(itemResult.url);
-              if (!sourceAllowed(itemResult.url)) continue;
-              recordSource(itemResult.url);
-              const combinedText = `${itemResult.title}\n${itemResult.snippet}\n${itemResult.url}`;
-              const extracted = extractDiscordInvites(combinedText, itemResult.url, searchResult.provider);
-
-              if (extracted.length > 0) {
-                for (const invite of extracted) {
-                  progress.invitesExtracted++;
-                  const existing = discoveredInvitesMap.get(invite.code) || [];
-                  existing.push(invite);
-                  discoveredInvitesMap.set(invite.code, existing);
-                }
+              if (searchResult.error || searchResult.statusCode !== 200) {
+                progress.queriesFailed++;
+                progress.providerErrors.push({
+                  provider: searchResult.provider,
+                  error: searchResult.error || `HTTP ${searchResult.statusCode}`,
+                  timestamp: new Date().toISOString(),
+                });
               } else {
-                // Requirement 5 & 9: Never assume a site-search result proves an invite exists.
-                // Collect discovered public discussions as potential community leads without confirmed invites.
-                if (itemResult.url && !seenLeadUrls.has(itemResult.url)) {
-                  seenLeadUrls.add(itemResult.url);
-                  const platformConfig = sourcePlatform;
-                  const platformId = platformConfig?.id || 'general_web';
-                  const platformName = platformConfig?.name || 'General Web';
-                  const category = platformConfig?.category || 'general_web';
+                progress.queriesSuccessful++;
+              }
 
-                  const lowerText = combinedText.toLowerCase();
-                  const hasCommunityIndicator =
-                    lowerText.includes('discord') ||
-                    lowerText.includes('community') ||
-                    lowerText.includes('server') ||
-                    lowerText.includes('chat') ||
-                    lowerText.includes('channel') ||
-                    lowerText.includes('group') ||
-                    lowerText.includes('trader') ||
-                    lowerText.includes('trading');
+              progress.sourceHits = (progress.sourceHits ?? 0) + searchResult.items.length;
 
-                  if (hasCommunityIndicator) {
-                    let domain = '';
-                    try {
-                      domain = new URL(itemResult.url).hostname;
-                    } catch {
-                      // ignore
+              // Extract invites from search snippets and links
+              for (const itemResult of searchResult.items) {
+                const sourcePlatform = identifySourcePlatform(itemResult.url);
+                if (!sourceAllowed(itemResult.url)) continue;
+                recordSource(itemResult.url);
+                const combinedText = `${itemResult.title}\n${itemResult.snippet}\n${itemResult.url}`;
+                const extracted = extractDiscordInvites(combinedText, itemResult.url, searchResult.provider);
+
+                if (extracted.length > 0) {
+                  for (const invite of extracted) {
+                    progress.invitesExtracted++;
+                    const existing = discoveredInvitesMap.get(invite.code) || [];
+                    existing.push(invite);
+                    discoveredInvitesMap.set(invite.code, existing);
+                  }
+                } else {
+                  // Requirement 5 & 9: Never assume a site-search result proves an invite exists.
+                  // Collect discovered public discussions as potential community leads without confirmed invites.
+                  if (itemResult.url && !seenLeadUrls.has(itemResult.url)) {
+                    seenLeadUrls.add(itemResult.url);
+                    const platformConfig = sourcePlatform;
+                    const platformId = platformConfig?.id || 'general_web';
+                    const platformName = platformConfig?.name || 'General Web';
+                    const category = platformConfig?.category || 'general_web';
+
+                    const lowerText = combinedText.toLowerCase();
+                    const hasCommunityIndicator =
+                      lowerText.includes('discord') ||
+                      lowerText.includes('community') ||
+                      lowerText.includes('server') ||
+                      lowerText.includes('chat') ||
+                      lowerText.includes('channel') ||
+                      lowerText.includes('group') ||
+                      lowerText.includes('trader') ||
+                      lowerText.includes('trading');
+
+                    if (hasCommunityIndicator) {
+                      let domain = '';
+                      try {
+                        domain = new URL(itemResult.url).hostname;
+                      } catch {
+                        // ignore
+                      }
+
+                      potentialLeads.push({
+                        id: `lead_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+                        sourcePlatform: platformId,
+                        sourcePlatformName: platformName,
+                        sourceCategory: category,
+                        sourceUrl: itemResult.url,
+                        sourceDomain: domain,
+                        title: itemResult.title,
+                        snippet: itemResult.snippet,
+                        topic: item.topic,
+                        language: item.language,
+                        discoveredAt: new Date().toISOString(),
+                        hasConfirmedInvite: false,
+                        reason: `Discussion or creator post discovered on ${platformName}, but no valid Discord invitation link was exposed in the public snippet/page.`,
+                      });
                     }
-
-                    potentialLeads.push({
-                      id: `lead_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-                      sourcePlatform: platformId,
-                      sourcePlatformName: platformName,
-                      sourceCategory: category,
-                      sourceUrl: itemResult.url,
-                      sourceDomain: domain,
-                      title: itemResult.title,
-                      snippet: itemResult.snippet,
-                      topic: item.topic,
-                      language: item.language,
-                      discoveredAt: new Date().toISOString(),
-                      hasConfirmedInvite: false,
-                      reason: `Discussion or creator post discovered on ${platformName}, but no valid Discord invitation link was exposed in the public snippet/page.`,
-                    });
                   }
                 }
               }
-            }
 
-            progress.uniqueInvites = discoveredInvitesMap.size;
-            progress.potentialLeadsCount = potentialLeads.length;
-            progress.leadsWithoutInvite = potentialLeads.length;
-            if (onProgress) onProgress({ ...progress });
-          } catch (err: any) {
-            progress.queriesFailed++;
-            progress.providerErrors.push({
-              provider: this.primaryProvider.name,
-              error: err.message || 'Search execution failed',
-              timestamp: new Date().toISOString(),
-            });
-            if (onProgress) onProgress({ ...progress });
-          }
-        })
-      );
-    }
+              progress.uniqueInvites = discoveredInvitesMap.size;
+              progress.potentialLeadsCount = potentialLeads.length;
+              progress.leadsWithoutInvite = potentialLeads.length;
+            } catch (err: any) {
+              progress.queriesFailed++;
+              progress.providerErrors.push({
+                provider: this.primaryProvider.name,
+                error: err.message || 'Search execution failed',
+                timestamp: new Date().toISOString(),
+              });
+            }
+          })
+        );
+        await onProgress?.({ ...progress });
+      }
+    };
+
+    progress.stage = 'searching';
+    await onProgress?.({ ...progress });
+    await runQueries(plan);
+    const widen = async () => {
+      progress.expandedAfterVerification = progress.stage === 'verifying';
+      progress.stage = 'widening';
+      progress.queriesPlanned += widerPlan.length;
+      await onProgress?.({ ...progress });
+      await runQueries(widerPlan);
+    };
+    const widenedEarly = progress.queriesSuccessful > 0 && discoveredInvitesMap.size < params.limit * 2 && widerPlan.length > 0;
+    if (widenedEarly) await widen();
 
     // Secondary expansion via Tavily if requested and depth > 1
     if (params.depth > 1 && !params.targetPlatforms?.length && this.secondaryProvider?.isAvailable()) {
@@ -308,7 +326,7 @@ export class SearchOrchestrator {
 
     // Verify unique discovered invites
     const verifiedList: { invite: VerifiedInvite; sources: DiscoveredInvite[] }[] = [];
-    const entries = Array.from(discoveredInvitesMap.entries());
+    const checkedCodes = new Set<string>();
 
     // Prioritize relevant public evidence BEFORE making Discord verification
     // requests. The previous insertion-order slice could spend the whole
@@ -327,13 +345,16 @@ export class SearchOrchestrator {
         (languageMatch && language.confidence === 'high' ? 3 : 0) +
         Math.min(2, domains.size);
     }
-    entries.sort((a, b) => candidatePriority(b[1]) - candidatePriority(a[1]));
+    const orderedCandidates = () => Array.from(discoveredInvitesMap.entries())
+      .filter(([code]) => !checkedCodes.has(code))
+      .map((entry) => ({ entry, priority: candidatePriority(entry[1]) }))
+      .sort((a, b) => b.priority - a.priority)
+      .map(({ entry }) => entry);
 
     // Keep the initial verification budget. Check an additional bounded set
     // only when the strict, deduplicated results are still below the limit.
     const initialBudget = params.limit * 2;
     const verificationBudget = Math.max(initialBudget, Math.min(params.limit * 4, 60));
-    const targetCodes = entries.slice(0, verificationBudget);
     let countryExcludedCount = 0;
     let relevanceExcludedCount = 0;
     const rankCandidates = () => {
@@ -350,49 +371,63 @@ export class SearchOrchestrator {
       });
     };
 
-    for (const [code, sources] of targetCodes) {
-      try {
-        const verified = await this.verifyInviteFn(code);
-        progress.invitesChecked++;
-        progress.invitesVerified = progress.invitesChecked;
+    const checkInvites = async (budget: number) => {
+      const targetCodes = orderedCandidates().slice(0, budget);
+      progress.stage = 'verifying';
+      progress.verificationPlanned = progress.invitesChecked + targetCodes.length;
+      await onProgress?.({ ...progress });
+      for (const [code, sources] of targetCodes) {
+        checkedCodes.add(code);
+        try {
+          const verified = await this.verifyInviteFn(code);
+          progress.invitesChecked++;
+          progress.invitesVerified = progress.invitesChecked;
 
-        if (verified.status === 'valid') {
-          progress.validInvites++;
-          progress.validInvitesFound = progress.validInvites;
-          verifiedList.push({ invite: verified, sources });
-        } else if (verified.status === 'expired_or_revoked') {
-          progress.invalidInvites++;
-          verifiedList.push({ invite: verified, sources });
-        } else {
-          progress.discordVerificationRateLimited = verified.status === 'rate_limited';
+          if (verified.status === 'valid') {
+            progress.validInvites++;
+            progress.validInvitesFound = progress.validInvites;
+            verifiedList.push({ invite: verified, sources });
+          } else if (verified.status === 'expired_or_revoked') {
+            progress.invalidInvites++;
+            verifiedList.push({ invite: verified, sources });
+          } else {
+            progress.discordVerificationRateLimited = verified.status === 'rate_limited';
+            progress.restrictedOrUnverified++;
+            verifiedList.push({ invite: verified, sources });
+          }
+        } catch (err: any) {
+          progress.invitesChecked++;
+          progress.invitesVerified = progress.invitesChecked;
           progress.restrictedOrUnverified++;
-          verifiedList.push({ invite: verified, sources });
+          verifiedList.push({
+            invite: {
+              code,
+              canonicalUrl: `https://discord.gg/${code}`,
+              status: 'unknown',
+              statusReason: `Verification exception: ${err.message}`,
+              lastVerifiedAt: new Date().toISOString(),
+            },
+            sources,
+          });
         }
-      } catch (err: any) {
-        progress.invitesChecked++;
-        progress.invitesVerified = progress.invitesChecked;
-        progress.restrictedOrUnverified++;
-        verifiedList.push({
-          invite: {
-            code,
-            canonicalUrl: `https://discord.gg/${code}`,
-            status: 'unknown',
-            statusReason: `Verification exception: ${err.message}`,
-            lastVerifiedAt: new Date().toISOString(),
-          },
-          sources,
-        });
-      }
 
-      if (onProgress) onProgress({ ...progress });
-      if (progress.discordVerificationRateLimited) break;
-      if (progress.invitesChecked >= initialBudget && progress.invitesChecked % params.limit === 0) {
-        const ranked = rankCandidates();
-        if (ranked.filter(({ invite }) => invite.status === 'valid').length >= params.limit) break;
+        await onProgress?.({ ...progress });
+        if (progress.discordVerificationRateLimited) break;
+        if (progress.invitesChecked >= initialBudget && progress.invitesChecked % params.limit === 0) {
+          const ranked = rankCandidates();
+          if (ranked.filter(({ invite }) => invite.status === 'valid').length >= params.limit) break;
+        }
       }
+    };
+
+    const canWidenAfterChecking = !widenedEarly && widerPlan.length > 0 && progress.queriesSuccessful > 0;
+    await checkInvites(canWidenAfterChecking ? initialBudget : verificationBudget);
+    if (canWidenAfterChecking && !progress.discordVerificationRateLimited &&
+        rankCandidates().filter(({ invite }) => invite.status === 'valid').length < params.limit) {
+      await widen();
+      await checkInvites(verificationBudget - progress.invitesChecked);
     }
-
-    progress.uncheckedInvites = entries.length - progress.invitesChecked;
+    progress.uncheckedInvites = discoveredInvitesMap.size - progress.invitesChecked;
     const ranked = rankCandidates();
     for (const r of ranked) {
       if (this.isSimulated) {
@@ -402,6 +437,16 @@ export class SearchOrchestrator {
 
     const finalResults = ranked.slice(0, params.limit);
     progress.qualifiedCommunities = ranked.filter(({ invite }) => invite.status === 'valid').length;
+    if (params.country && params.country.toLowerCase() !== 'all') {
+      progress.countryUnconfirmed = rankInviteResults(verifiedList.filter(({ invite }) =>
+        invite.status === 'valid' && (!params.minMembers ||
+          (invite.community?.approximateMemberCount ?? -1) >= params.minMembers),
+      ), params.topics, params.languages)
+        .filter((result) => result.countryEvidence?.status === 'unknown')
+        .slice(0, 5);
+    }
+    progress.stage = 'saving';
+    await onProgress?.({ ...progress });
 
     let languageFilterNotice: string | undefined;
     let countryFilterNotice: string | undefined;

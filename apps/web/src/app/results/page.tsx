@@ -7,13 +7,14 @@ import { RankedInviteResult } from '@discord-link-hunter/core';
 import { ScoreBadge } from '../../components/ScoreBadge';
 import { apiFetch } from '../../lib/api';
 
-function resultFilterParams(minScore: number, status: string, language: string, platform: string) {
+function resultFilterParams(minScore: number, status: string, language: string, platform: string, newOnly: boolean) {
   const params = new URLSearchParams();
   if (minScore > 0) params.append('minScore', minScore.toString());
   if (status !== 'all') params.append('status', status);
   if (language !== 'all') params.append('language', language);
   if (platform !== 'all') params.append('platform', platform);
 
+  if (newOnly) params.set('newOnly', 'true');
   return params;
 }
 
@@ -36,6 +37,8 @@ function ResultsContent() {
   const [showConfirmModal, setShowConfirmModal] = useState(false);
 
   // Filters
+  const [countryUnconfirmed, setCountryUnconfirmed] = useState<RankedInviteResult[]>([]);
+  const [newOnly, setNewOnly] = useState(false);
   const [minScore, setMinScore] = useState(0);
   const [statusFilter, setStatusFilter] = useState('valid');
   const [languageFilter, setLanguageFilter] = useState('all');
@@ -76,12 +79,13 @@ function ResultsContent() {
       setLoading(true);
       try {
         let url = `/api/results/${jobId}`;
-        const query = resultFilterParams(minScore, statusFilter, languageFilter, platformFilter).toString();
+        const query = resultFilterParams(minScore, statusFilter, languageFilter, platformFilter, newOnly).toString();
         if (query) url += `?${query}`;
 
-        const result = await apiFetch<{ results: RankedInviteResult[]; potentialLeads?: any[]; excludedCount?: number; inactiveCount?: number; activeStoredCount?: number }>(url);
+        const result = await apiFetch<{ results: RankedInviteResult[]; potentialLeads?: any[]; countryUnconfirmed?: RankedInviteResult[]; excludedCount?: number; inactiveCount?: number; activeStoredCount?: number }>(url);
         if (result.ok && result.data?.results) {
           setResults(result.data.results);
+          setCountryUnconfirmed(result.data.countryUnconfirmed ?? []);
           setPotentialLeads(result.data.potentialLeads || []);
           setExcludedCount(result.data.excludedCount || 0);
           setInactiveCount(result.data.inactiveCount || 0);
@@ -89,6 +93,7 @@ function ResultsContent() {
           setErrorMessage(null);
         } else {
           setResults([]);
+          setCountryUnconfirmed([]);
           setPotentialLeads([]);
           setExcludedCount(0);
           setInactiveCount(0);
@@ -106,7 +111,7 @@ function ResultsContent() {
     };
 
     fetchResults();
-  }, [jobId, minScore, statusFilter, languageFilter, platformFilter]);
+  }, [jobId, minScore, statusFilter, languageFilter, platformFilter, newOnly]);
 
   const handleExecuteLiveSearch = async () => {
     if (!job) return;
@@ -129,7 +134,7 @@ function ResultsContent() {
     }
   };
 
-  const csvFilters = resultFilterParams(minScore, statusFilter, languageFilter, platformFilter);
+  const csvFilters = resultFilterParams(minScore, statusFilter, languageFilter, platformFilter, newOnly);
   const jsonFilters = new URLSearchParams(csvFilters);
   csvFilters.set('format', 'csv');
   jsonFilters.set('format', 'json');
@@ -375,6 +380,27 @@ function ResultsContent() {
         </p>
       )}
 
+      <label className="flex items-center gap-2 text-sm text-slate-300">
+        <input type="checkbox" checked={newOnly} onChange={(event) => setNewOnly(event.target.checked)} />
+        New to me (compares with earlier searches in this workspace)
+      </label>
+
+      {!loading && countryUnconfirmed.length > 0 && (
+        <section className="workspace-panel p-4 space-y-2">
+          <h2 className="font-semibold text-slate-100">Country unconfirmed</h2>
+          <p className="text-xs text-slate-400">Active invites match the topic and language. The server’s country is unknown.</p>
+          <ul className="space-y-1 text-sm">
+            {countryUnconfirmed.map(({ invite }) => (
+              <li key={invite.code}>
+                <a className="text-sky-300" href={invite.canonicalUrl} target="_blank" rel="noopener noreferrer">
+                  {invite.community?.name ?? invite.code}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {/* Results Table */}
       {loading ? (
         <div className="p-12 text-center text-slate-500 text-sm">Loading results...</div>
@@ -385,7 +411,7 @@ function ResultsContent() {
           <p className="max-w-[540px] mx-auto text-sm text-[#9aafc1] leading-relaxed">
             {activeStoredCount === 0
               ? 'No active invitations passed all of this job’s discovery filters.'
-              : 'Some stored invitations are active, but your current score, language, or platform filters hide them.'}
+              : 'Some stored invitations are active, but the current view filters hide them.'}
           </p>
           {job?.progress?.validInvitesFound > 0 && (
             <p className="max-w-[540px] mx-auto text-xs text-[#829aac]">
@@ -393,8 +419,8 @@ function ResultsContent() {
             </p>
           )}
           <div className="flex flex-wrap justify-center gap-2 pt-3">
-            {(minScore > 0 || languageFilter !== 'all' || platformFilter !== 'all') && (
-              <button type="button" className="workspace-button workspace-button-secondary" onClick={() => { setMinScore(0); setLanguageFilter('all'); setPlatformFilter('all'); }}>Clear view filters</button>
+            {(minScore > 0 || languageFilter !== 'all' || platformFilter !== 'all' || newOnly) && (
+              <button type="button" className="workspace-button workspace-button-secondary" onClick={() => { setMinScore(0); setLanguageFilter('all'); setPlatformFilter('all'); setNewOnly(false); }}>Clear view filters</button>
             )}
             {statusFilter !== 'all' && (
               <button type="button" className="workspace-button workspace-button-secondary" onClick={() => setStatusFilter('all')}>Inspect all statuses</button>

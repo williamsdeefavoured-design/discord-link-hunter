@@ -209,10 +209,18 @@ export default function JobsPage() {
       ) : (
         <div className="space-y-4">
           {visibleJobs.map((job) => {
-            const pct =
-              job.progress.queriesPlanned > 0
-                ? Math.round((job.progress.queriesExecuted / job.progress.queriesPlanned) * 100)
-                : 0;
+            const stage = job.progress.stage;
+            const queryRatio = (job.progress.queriesSuccessful + job.progress.queriesFailed) /
+              Math.max(1, job.progress.queriesPlanned);
+            const verificationRatio = job.progress.invitesChecked / Math.max(1, job.progress.verificationPlanned ?? 0);
+            const pct = job.status === 'completed' || job.status === 'partial' ? 100
+              : stage === 'saving' ? 98
+              : stage === 'verifying' ? (job.progress.expandedAfterVerification ? 90 + Math.min(7, Math.round(verificationRatio * 7)) : 65 + Math.min(19, Math.round(verificationRatio * 19)))
+              : stage === 'widening' ? (job.progress.expandedAfterVerification ? 85 + Math.min(4, Math.round(queryRatio * 4)) : 45 + Math.min(19, Math.round(queryRatio * 19)))
+              : Math.min(45, Math.round(queryRatio * 45));
+            const stageLabel = stage === 'widening' ? 'Expanding search'
+              : stage === 'verifying' ? 'Checking invites'
+              : stage === 'saving' ? 'Saving results' : 'Searching sources';
 
             return (
               <div
@@ -322,7 +330,7 @@ export default function JobsPage() {
                 <div className="space-y-1.5">
                   <div className="flex justify-between text-xs text-slate-400 font-mono">
                     <span>
-                      Queries: {job.progress.queriesAttempted ?? job.progress.queriesExecuted} / {job.progress.queriesPlanned}
+                      {job.status === 'running' && <>{stageLabel} · </>}Queries: {job.progress.queriesAttempted ?? job.progress.queriesExecuted} / {job.progress.queriesPlanned}
                       {job.progress.queriesFailed > 0 && (
                         <span className="text-rose-400 ml-2">({job.progress.queriesFailed} failed)</span>
                       )}
