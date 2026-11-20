@@ -40,9 +40,10 @@ export class QueryPlanner {
     const targetsToUse: PlannedSourceTarget[] = [];
 
     // Keep source grouping stable when the orchestrator requests more queries.
-    if (targetPlatforms && activeSources.length > this.maxQueries && this.maxQueries > 0) {
-      for (let index = 0; index < this.maxQueries; index++) {
-        const group = activeSources.filter((_, i) => i % this.maxQueries === index);
+    const sourceBudget = params.depth >= 5 ? maxQueries : this.maxQueries;
+    if (targetPlatforms && activeSources.length > sourceBudget && sourceBudget > 0) {
+      for (let index = 0; index < sourceBudget; index++) {
+        const group = activeSources.filter((_, i) => i % sourceBudget === index);
         targetsToUse.push({
           operator: '(' + group.map((source) => source.searchOperatorTemplate).join(' OR ') + ')',
           platform: group.map((source) => source.id).join(','),
@@ -56,7 +57,7 @@ export class QueryPlanner {
           platform: src.id,
         });
       }
-    } else if (this.maxQueries >= activeSources.length + 1) {
+    } else if (sourceBudget >= activeSources.length + 1) {
       // Full budget mode (>= 11 queries): Generate dedicated individual query per platform
       targetsToUse.push({ operator: null, platform: 'general_web' });
       for (const src of activeSources) {

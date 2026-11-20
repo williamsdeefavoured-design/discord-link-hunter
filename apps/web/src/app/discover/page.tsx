@@ -43,7 +43,7 @@ export default function DiscoverPage() {
   const [country, setCountry] = useState('all');
   const [countrySearch, setCountrySearch] = useState('');
   const [limit, setLimit] = useState(10);
-  const depth = 1; // Stable standard search only.
+  const depth = limit;
   const mode = 'live' as const;
   const dryRun = false;
   const [loading, setLoading] = useState(false);
@@ -215,7 +215,7 @@ export default function DiscoverPage() {
         <div className="grid grid-cols-1 gap-4">
           <div className="space-y-2">
             <label htmlFor="limit" className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
-              Result Limit
+              Search depth
             </label>
             <select
               id="limit"
@@ -223,13 +223,13 @@ export default function DiscoverPage() {
               onChange={(e) => setLimit(Number(e.target.value))}
               className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
             >
-              <option value={5}>5 Communities (Fast)</option>
-              <option value={10}>10 Communities (Standard)</option>
-              <option value={20}>20 Communities (Extended)</option>
+              <option value={5}>5× · Up to 5 communities · ~30 seconds</option>
+              <option value={10}>10× · Up to 10 communities · ~1 minute</option>
+              <option value={20}>20× Extended · Up to 20 communities · ~2 minutes</option>
             </select>
           </div>
 
-          {/* Depth 2 hidden pending reliability validation */}
+          <p className="text-xs text-slate-400">Deeper searches try more queries across your selected sources. Jobs can finish early if the search plan is exhausted.</p>
         </div>
 
         {statusMessage && (
