@@ -228,8 +228,8 @@ export default function JobsPage() {
                 className="p-5 rounded-xl border border-slate-800 bg-slate-900/50 hover:border-slate-700 transition space-y-4"
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center space-x-3">
-                    <span className="font-mono text-sm font-semibold text-white">{job.id}</span>
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <span className="min-w-0 break-all font-mono text-sm font-semibold text-white">{job.id}</span>
                     {getStatusBadge(job.status)}
                     {job.mode === 'live' && !job.isSimulated ? (
                       <span className="text-[11px] px-2 py-0.5 rounded font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
@@ -242,7 +242,7 @@ export default function JobsPage() {
                     )}
                   </div>
 
-                  <div className="flex items-center space-x-3">
+                  <div className="flex flex-wrap items-center gap-3">
                     {job.status === 'running' && (
                       <button
                         onClick={() => handleCancel(job.id)}

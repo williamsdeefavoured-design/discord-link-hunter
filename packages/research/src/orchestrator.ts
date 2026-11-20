@@ -14,7 +14,7 @@ import {
   getCountryName,
 } from '@discord-link-hunter/core';
 import { QueryPlanner } from './query-planner.js';
-import { QueryPlanItem, SearchProvider } from './types.js';
+import { ProviderSearchResult, QueryPlanItem, SearchProvider } from './types.js';
 
 export interface SearchOrchestratorOptions {
   primaryProvider: SearchProvider;
@@ -125,7 +125,35 @@ export class SearchOrchestrator {
       mock: 0,
     };
 
-    let primaryDisabled = false;
+    const disabledProviders = new Set<SearchProvider>();
+    const search = async (provider: SearchProvider | undefined, item: QueryPlanItem): Promise<ProviderSearchResult | undefined> => {
+      if (!provider || disabledProviders.has(provider) || !provider.isAvailable()) return undefined;
+
+      providerUsage[provider.name] = (providerUsage[provider.name] || 0) + 1;
+      const result = await provider.search(item.query, {
+        language: item.language,
+        country: params.country,
+        depth: params.depth,
+      }).catch((error: unknown): ProviderSearchResult => ({
+        provider: provider.name,
+        query: item.query,
+        items: [],
+        statusCode: 0,
+        durationMs: 0,
+        error: error instanceof Error ? error.message : 'Search provider request failed',
+      }));
+
+      if (result.isPermanentError) disabledProviders.add(provider);
+      if (result.error || result.statusCode !== 200) {
+        progress.providerErrors.push({
+          provider: provider.name,
+          error: result.error || `HTTP ${result.statusCode}`,
+          timestamp: new Date().toISOString(),
+        });
+      }
+      return result;
+    };
+    const succeeded = (result?: ProviderSearchResult) => result?.statusCode === 200 && !result.error;
     const sourceAllowed = (url: string) => {
       if (!params.targetPlatforms?.length) return true;
       if (!/^https?:\/\//i.test(url)) return false;
@@ -145,62 +173,24 @@ export class SearchOrchestrator {
             progress.queriesExecuted = progress.queriesAttempted;
 
             try {
-              let searchResult: any = null;
-
-              // Attempt primary provider if available and not permanently broken
-              if (!primaryDisabled && this.primaryProvider.isAvailable()) {
-                providerUsage[this.primaryProvider.name] = (providerUsage[this.primaryProvider.name] || 0) + 1;
-                searchResult = await this.primaryProvider.search(item.query, {
-                  language: item.language,
-                  country: params.country,
-                  depth: params.depth,
-                });
-
-                if (searchResult?.isPermanentError) {
-                  primaryDisabled = true;
-                }
-              }
-
-              // Automatic Failover:
-              // If primary failed, was unavailable, or returned 0 items, failover to secondary provider
-              const primaryFailed = !searchResult || searchResult.statusCode !== 200 || searchResult.items.length === 0;
-              if (primaryFailed && this.secondaryProvider?.isAvailable()) {
-                if (searchResult?.error) {
-                  progress.providerErrors.push({
-                    provider: this.primaryProvider.name,
-                    error: searchResult.error,
-                    timestamp: new Date().toISOString(),
-                  });
-                }
-
-                providerUsage[this.secondaryProvider.name] = (providerUsage[this.secondaryProvider.name] || 0) + 1;
-                searchResult = await this.secondaryProvider.search(item.query, {
-                  language: item.language,
-                  country: params.country,
-                  depth: params.depth,
-                });
-              }
+              const primaryResult = await search(this.primaryProvider, item);
+              const secondaryResult = succeeded(primaryResult) && primaryResult?.items.length
+                ? undefined : await search(this.secondaryProvider, item);
+              const searchResult = succeeded(secondaryResult) ? secondaryResult
+                : succeeded(primaryResult) ? primaryResult : undefined;
 
               if (!searchResult) {
                 progress.queriesFailed++;
-                progress.providerErrors.push({
-                  provider: this.primaryProvider.name,
-                  error: 'No research provider was available to execute this query',
-                  timestamp: new Date().toISOString(),
-                });
-                  return;
+                if (!primaryResult && !secondaryResult && progress.providerErrors.length === 0) {
+                  progress.providerErrors.push({
+                    provider: this.primaryProvider.name,
+                    error: 'No research provider was available to execute this query',
+                    timestamp: new Date().toISOString(),
+                  });
+                }
+                return;
               }
-
-              if (searchResult.error || searchResult.statusCode !== 200) {
-                progress.queriesFailed++;
-                progress.providerErrors.push({
-                  provider: searchResult.provider,
-                  error: searchResult.error || `HTTP ${searchResult.statusCode}`,
-                  timestamp: new Date().toISOString(),
-                });
-              } else {
-                progress.queriesSuccessful++;
-              }
+              progress.queriesSuccessful++;
 
               progress.sourceHits = (progress.sourceHits ?? 0) + searchResult.items.length;
 

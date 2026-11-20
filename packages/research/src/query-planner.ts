@@ -3,7 +3,6 @@ import {
   getCountryName,
   getSynonymsForTopic,
   LanguageCode,
-  ResearchSourceConfig,
   SearchJobParams,
   SourceRegistry,
   TradingTopic,
@@ -40,9 +39,10 @@ export class QueryPlanner {
     // Build planned source targets based on budget and platform selection
     const targetsToUse: PlannedSourceTarget[] = [];
 
-    if (targetPlatforms && activeSources.length > maxQueries && maxQueries > 0) {
-      for (let index = 0; index < maxQueries; index++) {
-        const group = activeSources.filter((_, i) => i % maxQueries === index);
+    // Keep source grouping stable when the orchestrator requests more queries.
+    if (targetPlatforms && activeSources.length > this.maxQueries && this.maxQueries > 0) {
+      for (let index = 0; index < this.maxQueries; index++) {
+        const group = activeSources.filter((_, i) => i % this.maxQueries === index);
         targetsToUse.push({
           operator: '(' + group.map((source) => source.searchOperatorTemplate).join(' OR ') + ')',
           platform: group.map((source) => source.id).join(','),
@@ -56,7 +56,7 @@ export class QueryPlanner {
           platform: src.id,
         });
       }
-    } else if (maxQueries >= activeSources.length + 1) {
+    } else if (this.maxQueries >= activeSources.length + 1) {
       // Full budget mode (>= 11 queries): Generate dedicated individual query per platform
       targetsToUse.push({ operator: null, platform: 'general_web' });
       for (const src of activeSources) {
@@ -102,12 +102,15 @@ export class QueryPlanner {
       education: 'trading education',
     };
 
-    const combinations = languages.flatMap((language) => topics.map((topic) => {
+    // Rotate languages across topics so the first pass covers both selections.
+    const combinations = Array.from({ length: languages.length * topics.length }, (_, index) => {
+      const topic = topics[index % topics.length];
+      const language = languages[(Math.floor(index / topics.length) + index % topics.length) % languages.length];
       const localized = getSynonymsForTopic(topic, language);
       const variants = [...new Set([localized[0], globalTopicTerm[topic], ...localized.slice(1, 4)])]
         .filter((value): value is string => Boolean(value));
       return { language, topic, variants };
-    }));
+    });
     const maxVariants = Math.max(...combinations.map(({ variants }) => variants.length));
 
     for (let round = 0; round < combinations.length * maxVariants; round++) {

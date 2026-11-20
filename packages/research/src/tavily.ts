@@ -37,6 +37,7 @@ export class TavilyAdapter implements SearchProvider {
     try {
       const res = await this.fetchFn('https://api.tavily.com/search', {
         method: 'POST',
+        signal: AbortSignal.timeout(12000),
         headers: {
           'Content-Type': 'application/json',
         },
