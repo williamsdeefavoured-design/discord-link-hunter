@@ -27,7 +27,7 @@ export interface LinkHunterRepository {
   listJobs(limit?: number): Promise<SearchJob[]>;
   saveResults(jobId: string, results: RankedInviteResult[]): Promise<void>;
   getJobResults(jobId: string): Promise<RankedInviteResult[]>;
-  getPreviouslySeen(job: SearchJob, results: RankedInviteResult[]): Promise<Set<string>>;
+  getPreviouslySeen(job: SearchJob, results: Pick<RankedInviteResult, 'invite'>[]): Promise<Set<string>>;
   recordProviderUsage(provider: string, count: number, credits?: number, error?: string): Promise<void>;
   getProviderStats(): Promise<Record<string, { requests: number; credits: number; errors: number }>>;
 }
@@ -146,7 +146,7 @@ export class InMemoryRepository implements LinkHunterRepository {
     this.persistToFile();
   }
 
-  async getPreviouslySeen(job: SearchJob, results: RankedInviteResult[]): Promise<Set<string>> {
+  async getPreviouslySeen(job: SearchJob, results: Pick<RankedInviteResult, 'invite'>[]): Promise<Set<string>> {
     const requested = new Set(results.map(({ invite }) => invite.community?.id ? 'guild:' + invite.community.id : 'invite:' + invite.code));
     const seen = new Set<string>();
     for (const [id, previous] of this.jobs) {
@@ -154,6 +154,7 @@ export class InMemoryRepository implements LinkHunterRepository {
       for (const { invite } of this.jobResults.get(id) ?? previous.results) {
         const key = invite.community?.id ? 'guild:' + invite.community.id : 'invite:' + invite.code;
         if (requested.has(key)) seen.add(key);
+        if (requested.has('invite:' + invite.code)) seen.add('invite:' + invite.code);
       }
     }
     return seen;
@@ -752,7 +753,7 @@ export class PostgresRepository implements LinkHunterRepository {
     }
   }
 
-  async getPreviouslySeen(job: SearchJob, results: RankedInviteResult[]): Promise<Set<string>> {
+  async getPreviouslySeen(job: SearchJob, results: Pick<RankedInviteResult, 'invite'>[]): Promise<Set<string>> {
     const db = getDbClient();
     if (!db || results.length === 0) return new Set();
     const guilds = results.flatMap(({ invite }) => invite.community?.id ? [invite.community.id] : []);

@@ -4,6 +4,7 @@ export interface SearchResultItem {
   title: string;
   url: string;
   snippet: string;
+  pageContent?: string;
   date?: string;
 }
 
@@ -24,6 +25,7 @@ export interface SearchProviderOptions {
   language?: LanguageCode;
   country?: string;
   depth?: number;
+  includePageContent?: boolean;
 }
 
 export interface SearchProvider {

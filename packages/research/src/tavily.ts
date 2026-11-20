@@ -46,6 +46,7 @@ export class TavilyAdapter implements SearchProvider {
           query,
           search_depth: (options.depth || 1) > 1 ? 'advanced' : 'basic',
           include_answer: false,
+          ...(options.includePageContent ? { include_raw_content: 'markdown' } : {}),
           max_results: limit,
         }),
       });
@@ -104,6 +105,8 @@ export class TavilyAdapter implements SearchProvider {
         title: String(item.title || ''),
         url: String(item.url || ''),
         snippet: String(item.content || ''),
+        ...(options.includePageContent && typeof item.raw_content === 'string'
+          ? { pageContent: item.raw_content.slice(0, 100_000) } : {}),
         date: item.published_date ? String(item.published_date) : undefined,
       }));
 

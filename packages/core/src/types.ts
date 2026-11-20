@@ -196,6 +196,7 @@ export interface SearchJobProgress {
   expandedAfterVerification?: boolean;
   stage?: 'searching' | 'widening' | 'verifying' | 'saving';
   countryUnconfirmed?: RankedInviteResult[];
+  verifiedFindings?: RankedInviteResult[];
   invitesExtracted: number;
   uniqueInvites: number;
   invitesChecked: number;

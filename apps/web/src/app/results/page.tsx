@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { ShieldCheck, Download, ExternalLink, Filter, Users, Globe2, Tag, ClipboardList, Play, RefreshCw, ArrowRight, AlertCircle } from 'lucide-react';
-import { RankedInviteResult } from '@discord-link-hunter/core';
+import { RankedInviteResult, matchesCountryFilter } from '@discord-link-hunter/core';
 import { ScoreBadge } from '../../components/ScoreBadge';
 import { apiFetch } from '../../lib/api';
 
@@ -482,7 +482,21 @@ function ResultsContent() {
                         )}
                       </details>
                       {res.scoreBreakdown.preferenceMatch === false && res.invite.status === 'valid' && (
-                        <p className="text-xs text-amber-300">Broader result</p>
+                        <div className="space-y-1 text-xs text-amber-300">
+                          <p>Broader result</p>
+                          {job?.params?.topics?.length > 0 && (
+                            <p>Topic: {res.detectedTopics.length === 0 ? 'Unknown' : res.detectedTopics.some((topic) => job.params.topics.includes(topic)) ? 'Selected topic found' : 'Different topic found'}{res.detectedTopics.length > 0 && ` (${res.detectedTopics.join(', ')})`}</p>
+                          )}
+                          {job?.params?.languages?.length > 0 && (
+                            <p>Language: {res.detectedLanguage === 'unknown' ? 'Unknown' : `${job.params.languages.includes(res.detectedLanguage) ? 'Matches' : 'Differs'} (${res.detectedLanguage.toUpperCase()})`}</p>
+                          )}
+                          {job?.params?.country && job.params.country.toLowerCase() !== 'all' && (
+                            <p>Country: {res.countryEvidence?.countryCode && matchesCountryFilter(res.countryEvidence, res.countryEvidence.countryCode) ? `${matchesCountryFilter(res.countryEvidence, job.params.country) ? 'Matches' : 'Differs'} (${res.countryEvidence.countryCode})` : 'Unknown'}</p>
+                          )}
+                        </div>
+                      )}
+                      {res.scoreBreakdown.preferenceMatch === true && res.invite.status === 'valid' && (
+                        <p className="text-xs text-emerald-300">Exact preference match</p>
                       )}
                       {res.invite.community?.description && (
                         <p className="text-[11px] text-slate-400 truncate mt-0.5">
