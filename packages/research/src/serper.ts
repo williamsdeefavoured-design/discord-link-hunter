@@ -52,6 +52,7 @@ export class SerperAdapter implements SearchProvider {
     try {
       const res = await this.fetchFn('https://google.serper.dev/search', {
         method: 'POST',
+        signal: AbortSignal.timeout(12000),
         headers: {
           'X-API-KEY': this.apiKey,
           'Content-Type': 'application/json',

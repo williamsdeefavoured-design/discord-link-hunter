@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { detectCountryEvidence, detectLanguageEvidence, getSelectableCountries, matchesCountryFilter, rankInviteResults, type VerifiedInvite } from '../packages/core/src/index.js';
+import { getDefaultSourceRegistry } from '../packages/core/src/sources.js';
 import { QueryPlanner } from '../packages/research/src/query-planner.js';
 import { SearchOrchestrator } from '../packages/research/src/orchestrator.js';
 
@@ -140,6 +141,42 @@ describe('Bounded verification when early invites fail relevance', () => {
 
     expect(result.progress).toMatchObject({ invitesChecked: 1, uncheckedInvites: 4, discordVerificationRateLimited: true });
   });
+});
+
+it('covers every selected topic, language and platform in the initial all-filters plan', () => {
+  const topics = ['forex', 'xauusd', 'stocks', 'crypto', 'futures', 'options', 'indices',
+    'day_trading', 'swing_trading', 'technical_analysis', 'investing', 'education'] as const;
+  const languages = ['en', 'de', 'es', 'pt', 'fr', 'ar', 'it', 'tr', 'nl'] as const;
+  const targetPlatforms = getDefaultSourceRegistry().getActiveSources().map(({ id }) => id);
+  const planner = new QueryPlanner(12);
+  const params = { topics: [...topics], languages: [...languages], targetPlatforms, country: 'FR', limit: 50, depth: 1 };
+  const plan = planner.generatePlan(params);
+  const expanded = planner.generatePlan(params, 24);
+
+  expect(plan).toHaveLength(12);
+  expect(new Set(plan.map(({ topic }) => topic))).toEqual(new Set(topics));
+  expect(new Set(plan.map(({ language }) => language))).toEqual(new Set(languages));
+  expect(new Set(plan.flatMap(({ platform }) => platform?.split(',') ?? []))).toEqual(new Set(targetPlatforms));
+  expect(plan.every(({ query }) => query.includes('"France"'))).toBe(true);
+  expect(expanded).toHaveLength(24);
+  expect(expanded.slice(0, plan.length)).toEqual(plan);
+});
+
+it.each([false, true])('handles a failing provider alongside a successful empty search (primary fails: %s)', async (primaryFails) => {
+  const emptySearch = vi.fn(async (query: string) => ({
+    provider: 'serper' as const, query, statusCode: 200, durationMs: 1, items: [],
+  }));
+  const failedSearch = vi.fn(async () => { throw new Error('Provider timed out'); });
+  const provider = { isAvailable: () => true, getDailyRequestCount: () => 0 };
+  const output = await new SearchOrchestrator({
+    primaryProvider: { ...provider, name: 'serper', search: primaryFails ? failedSearch : emptySearch },
+    secondaryProvider: { ...provider, name: 'tavily', search: primaryFails ? emptySearch : failedSearch },
+    queryPlanner: new QueryPlanner(1),
+  }).executeJob({ topics: ['forex'], languages: ['en'], targetPlatforms: ['reddit'], limit: 1, depth: 1 });
+
+  expect(output.results).toEqual([]);
+  expect(output.progress).toMatchObject({ queriesSuccessful: 2, queriesFailed: 0 });
+  expect(output.progress.providerErrors[0]?.error).toBe('Provider timed out');
 });
 
 it('widens a regional search and keeps unconfirmed matches separate', async () => {

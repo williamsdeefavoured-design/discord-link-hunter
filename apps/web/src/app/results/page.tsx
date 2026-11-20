@@ -141,12 +141,12 @@ function ResultsContent() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center space-x-3">
-            <div className="workspace-kicker mb-2">03 / VERIFIED FINDINGS</div>
+      <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4">
+        <div className="min-w-0">
+          <div className="workspace-kicker mb-2">03 / VERIFIED FINDINGS</div>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
             <h1 className="text-2xl md:text-3xl font-semibold text-white tracking-[-0.04em] flex items-center space-x-2">
-              <ShieldCheck className="w-6 h-6 text-indigo-400" />
+              <ShieldCheck className="w-6 h-6 shrink-0 text-indigo-400" />
               <span>Ranked Discord Communities</span>
             </h1>
             {job?.status === 'dry_run_plan' ? (
@@ -164,12 +164,12 @@ function ResultsContent() {
             )}
           </div>
           <p className="mt-1 text-sm text-slate-400">
-            Job: <span className="font-mono text-slate-200">{jobId || 'Loading...'}</span> • Evaluated with deterministic scoring model.
+            Job: <span className="font-mono break-all text-slate-200">{jobId || 'Loading...'}</span> • Evaluated with deterministic scoring model.
           </p>
         </div>
 
         {/* Export buttons */}
-        <div className="flex items-center space-x-2">
+        <div className="flex flex-wrap items-center gap-2 lg:shrink-0">
           <a
             href={`/api/export/${jobId}?${csvFilters}`}
             download
