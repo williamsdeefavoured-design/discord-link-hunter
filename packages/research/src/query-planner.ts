@@ -40,9 +40,10 @@ export class QueryPlanner {
     const targetsToUse: PlannedSourceTarget[] = [];
 
     // Keep source grouping stable when the orchestrator requests more queries.
-    if (targetPlatforms && activeSources.length > this.maxQueries && this.maxQueries > 0) {
-      for (let index = 0; index < this.maxQueries; index++) {
-        const group = activeSources.filter((_, i) => i % this.maxQueries === index);
+    const sourceBudget = params.depth >= 5 ? maxQueries : this.maxQueries;
+    if (targetPlatforms && activeSources.length > sourceBudget && sourceBudget > 0) {
+      for (let index = 0; index < sourceBudget; index++) {
+        const group = activeSources.filter((_, i) => i % sourceBudget === index);
         targetsToUse.push({
           operator: '(' + group.map((source) => source.searchOperatorTemplate).join(' OR ') + ')',
           platform: group.map((source) => source.id).join(','),
@@ -56,7 +57,7 @@ export class QueryPlanner {
           platform: src.id,
         });
       }
-    } else if (this.maxQueries >= activeSources.length + 1) {
+    } else if (sourceBudget >= activeSources.length + 1) {
       // Full budget mode (>= 11 queries): Generate dedicated individual query per platform
       targetsToUse.push({ operator: null, platform: 'general_web' });
       for (const src of activeSources) {
@@ -113,11 +114,13 @@ export class QueryPlanner {
     });
     const maxVariants = Math.max(...combinations.map(({ variants }) => variants.length));
 
-    for (let round = 0; round < combinations.length * maxVariants; round++) {
+    const inviteIntents = params.depth >= 5 ? ['', 'invite', 'join', 'discord.gg'] : [''];
+    const roundsPerIntent = combinations.length * maxVariants;
+    for (let round = 0; round < roundsPerIntent * inviteIntents.length; round++) {
       for (const [targetIndex, target] of targetsToUse.entries()) {
         if (planned.length >= maxQueries) return planned;
         const combination = combinations[(round + targetIndex) % combinations.length];
-        const variantIndex = Math.floor(round / combinations.length);
+        const variantIndex = Math.floor((round % roundsPerIntent) / combinations.length);
         if (variantIndex >= combination.variants.length) continue;
         const synonym = combination.variants[(variantIndex + targetIndex) % combination.variants.length];
         const discordTerm = target.operator === null && round === 0
@@ -126,7 +129,7 @@ export class QueryPlanner {
         const countryTerm = countryName && (target.operator === null || round === 0 || round % 2 === 0)
           ? ['"' + countryName + '"']
           : [];
-        const query = [target.operator, '"' + synonym + '"', ...countryTerm, discordTerm].filter(Boolean).join(' ');
+        const query = [target.operator, '"' + synonym + '"', ...countryTerm, discordTerm, inviteIntents[Math.floor(round / roundsPerIntent)]].filter(Boolean).join(' ');
         const key = combination.language + ':' + query;
         if (seenQueries.has(key)) continue;
         seenQueries.add(key);

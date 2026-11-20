@@ -63,7 +63,27 @@ export class SearchOrchestrator {
     params: SearchJobParams,
     onProgress?: (progress: SearchJobProgress) => void | Promise<void>
   ): Promise<OrchestrationResult> {
-    const plan = this.queryPlanner.generatePlan(params);
+    const timedMode = params.depth === 5 || params.depth === 10 || params.depth === 20;
+    const timeBudgetMs = timedMode ? params.depth * 12000 : 0;
+    const deadline = timedMode ? Date.now() + timeBudgetMs : Infinity;
+    // Leave time to verify candidates after the provider search closes.
+    const searchDeadline = deadline - timeBudgetMs / 3;
+    const queryBudget = params.depth === 5 ? 36 : params.depth === 10 ? 60 : 96;
+    const plan = timedMode ? this.queryPlanner.generatePlan(params, queryBudget) : this.queryPlanner.generatePlan(params);
+    const withinDeadline = async <T>(end: number, operation: () => Promise<T>): Promise<T> => {
+      if (!timedMode) return operation();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          operation(),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => reject(new Error('Search time budget reached')), Math.max(0, end - Date.now()));
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+    };
     const wideningBudget = params.depth === 1 && plan.length > 0 ? (this.includeBroadMatches ? 12 : Math.min(6, plan.length)) : 0;
     const plannedKeys = new Set(plan.map(({ language, query }) => language + ':' + query));
     const widerPlan = wideningBudget ? this.queryPlanner.generatePlan(params, plan.length + wideningBudget)
@@ -93,7 +113,7 @@ export class SearchOrchestrator {
     };
 
     if (params.dryRun) {
-      const estimatedRequests = plan.length + widerPlan.length + (params.depth > 1 && !params.targetPlatforms?.length ? 3 : 0);
+      const estimatedRequests = plan.length + widerPlan.length + (params.depth === 2 && !params.targetPlatforms?.length ? 3 : 0);
       const estimatedCredits = estimatedRequests;
       const dryRunExplanation =
         'Dry Run generated the multilingual query strategy without dispatching external network requests. ' +
@@ -127,14 +147,14 @@ export class SearchOrchestrator {
 
     const disabledProviders = new Set<SearchProvider>();
     const search = async (provider: SearchProvider | undefined, item: QueryPlanItem): Promise<ProviderSearchResult | undefined> => {
-      if (!provider || disabledProviders.has(provider) || !provider.isAvailable()) return undefined;
+      if (Date.now() >= searchDeadline || !provider || disabledProviders.has(provider) || !provider.isAvailable()) return undefined;
 
       providerUsage[provider.name] = (providerUsage[provider.name] || 0) + 1;
-      const result = await provider.search(item.query, {
+      const result = await withinDeadline(searchDeadline, () => provider.search(item.query, {
         language: item.language,
         country: params.country,
-        depth: params.depth,
-      }).catch((error: unknown): ProviderSearchResult => ({
+        depth: params.depth === 2 ? 2 : 1,
+      })).catch((error: unknown): ProviderSearchResult => ({
         provider: provider.name,
         query: item.query,
         items: [],
@@ -165,6 +185,7 @@ export class SearchOrchestrator {
     // Execute queries in bounded concurrent batches
     const runQueries = async (queries: QueryPlanItem[]) => {
       for (let i = 0; i < queries.length; i += this.maxConcurrent) {
+        if (Date.now() >= searchDeadline) break;
         const batch = queries.slice(i, i + this.maxConcurrent);
 
         await Promise.all(
@@ -289,7 +310,7 @@ export class SearchOrchestrator {
     if (widenedEarly) await widen();
 
     // Secondary expansion via Tavily if requested and depth > 1
-    if (params.depth > 1 && !params.targetPlatforms?.length && this.secondaryProvider?.isAvailable()) {
+    if (params.depth === 2 && !params.targetPlatforms?.length && this.secondaryProvider?.isAvailable()) {
       const topInvites = Array.from(discoveredInvitesMap.entries()).slice(0, 3);
       for (const [code] of topInvites) {
         try {
@@ -347,7 +368,7 @@ export class SearchOrchestrator {
     // Keep the initial verification budget. Check an additional bounded set
     // only when the strict, deduplicated results are still below the limit.
     const initialBudget = params.limit * 2;
-    const verificationBudget = Math.max(initialBudget, Math.min(params.limit * 4, 60));
+    const verificationBudget = timedMode ? params.limit * 4 : Math.max(initialBudget, Math.min(params.limit * 4, 60));
     let countryExcludedCount = 0;
     let relevanceExcludedCount = 0;
     const rankCandidates = () => {
@@ -370,9 +391,10 @@ export class SearchOrchestrator {
       progress.verificationPlanned = progress.invitesChecked + targetCodes.length;
       await onProgress?.({ ...progress });
       for (const [code, sources] of targetCodes) {
+        if (Date.now() >= deadline) break;
         checkedCodes.add(code);
         try {
-          const verified = await this.verifyInviteFn(code);
+          const verified = await withinDeadline(deadline, () => this.verifyInviteFn(code));
           progress.invitesChecked++;
           progress.invitesVerified = progress.invitesChecked;
 

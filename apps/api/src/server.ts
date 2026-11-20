@@ -198,7 +198,7 @@ export function buildServer(
       'Choose a selectable ISO country code or All Countries',
     ).transform((value) => value === '' || value === 'ALL' ? undefined : value).optional(),
     limit: z.number().int().min(1).max(50).default(10),
-    depth: z.number().int().min(1).max(2).default(1),
+    depth: z.union([z.literal(1), z.literal(2), z.literal(5), z.literal(10), z.literal(20)]).default(1),
     minMembers: z.number().int().nonnegative().optional(),
     dryRun: z.boolean().optional(),
     targetPlatforms: z.array(z.string().refine(

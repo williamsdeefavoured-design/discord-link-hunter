@@ -219,3 +219,13 @@ it('retains working invites in broad discovery when strict preferences would hid
   expect(output.results[0].scoreBreakdown.preferenceMatch).toBe(false);
   expect(output.progress).toMatchObject({ qualifiedCommunities: 0, broadMatchesShown: 1 });
 });
+
+it.each([[5, 36], [10, 60], [20, 96]])('plans up to %i× discovery with the expanded query budget (%i)', async (depth, expected) => {
+  const search = vi.fn();
+  const result = await new SearchOrchestrator({
+    primaryProvider: { name: 'serper', search, isAvailable: () => true, getDailyRequestCount: () => 0 },
+  }).executeJob({ topics: ['forex'], languages: ['en'], limit: depth, depth, dryRun: true });
+
+  expect(result.plannedQueries).toHaveLength(expected);
+  expect(search).not.toHaveBeenCalled();
+});
