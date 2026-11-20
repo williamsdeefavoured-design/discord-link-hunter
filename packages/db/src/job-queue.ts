@@ -139,7 +139,12 @@ export class JobQueueManager {
           maxConcurrent: config.SEARCH_MAX_CONCURRENT_REQUESTS,
           verifyInviteFn: verifyDiscordInvite,
           isSimulated: false,
-          includeBroadMatches: true,
+          includeBroadMatches: config.SEARCH_PREFERENCE_MODE === 'broad',
+          timedSecondsPerDepth: config.SEARCH_TIMED_SECONDS_PER_DEPTH,
+          timedMaxRequests: config.SEARCH_TIMED_MAX_REQUESTS,
+          previouslySeenInvites: (codes) => this.repo.getPreviouslySeen(job, codes.map((code) => ({
+            invite: { code, canonicalUrl: 'https://discord.gg/' + code, status: 'unknown', lastVerifiedAt: '' },
+          }))),
         });
       } else {
         // Explicit Mock Mode using simulated adapter and deterministic verifier
@@ -167,6 +172,7 @@ export class JobQueueManager {
         countryFilterNotice,
         providerUsage,
       } = await orchestrator.executeJob(job.params, async (currentProgress) => {
+        job.progress = currentProgress;
         await this.repo.updateJobProgress(jobId, currentProgress, 'running');
       });
 

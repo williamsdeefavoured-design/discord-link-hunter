@@ -258,6 +258,21 @@ export function hasCredibleTopicEvidence(
   return requestedTopics.some((topic) => res.detectedTopics.includes(topic));
 }
 
+export function hasTradingCommunityEvidence(result: RankedInviteResult): boolean {
+  const community = result.invite.community;
+  const metadata = [community?.name, community?.description, result.invite.channelName].filter(Boolean).join(' ');
+  if (hasNonTradingContext(metadata)) return false;
+  if (detectTopicsFromText(metadata).length || hasGeneralTradingContext(metadata)) return true;
+  if (community?.description?.trim()) return false;
+
+  // Require corroboration when Discord supplies little metadata.
+  const domains = new Set(result.sources.filter(({ contextSnippet }) =>
+    Boolean(contextSnippet && !hasNonTradingContext(contextSnippet) &&
+      (detectTopicsFromText(contextSnippet).length || hasGeneralTradingContext(contextSnippet)))
+  ).map(({ sourceDomain }) => sourceDomain).filter(Boolean));
+  return domains.size >= 2;
+}
+
 export function rankInviteResults(
   verifiedInvites: { invite: VerifiedInvite; sources: DiscoveredInvite[] }[],
   requestedTopics: TradingTopic[],

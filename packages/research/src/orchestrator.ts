@@ -12,6 +12,7 @@ import {
   detectTopicsFromText,
   detectLanguageEvidence,
   getCountryName,
+  hasTradingCommunityEvidence,
 } from '@discord-link-hunter/core';
 import { QueryPlanner } from './query-planner.js';
 import { ProviderSearchResult, QueryPlanItem, SearchProvider } from './types.js';
@@ -24,6 +25,9 @@ export interface SearchOrchestratorOptions {
   verifyInviteFn?: (code: string) => Promise<VerifiedInvite>;
   isSimulated?: boolean;
   includeBroadMatches?: boolean;
+  timedSecondsPerDepth?: number;
+  timedMaxRequests?: number;
+  previouslySeenInvites?: (codes: string[]) => Promise<Set<string>>;
 }
 
 export interface OrchestrationResult {
@@ -48,6 +52,9 @@ export class SearchOrchestrator {
   private verifyInviteFn: (code: string) => Promise<VerifiedInvite>;
   private isSimulated: boolean;
   private includeBroadMatches: boolean;
+  private timedSecondsPerDepth: number;
+  private timedMaxRequests: number;
+  private previouslySeenInvites?: SearchOrchestratorOptions['previouslySeenInvites'];
 
   constructor(options: SearchOrchestratorOptions) {
     this.primaryProvider = options.primaryProvider;
@@ -56,6 +63,9 @@ export class SearchOrchestrator {
     this.maxConcurrent = options.maxConcurrent || 2;
     this.verifyInviteFn = options.verifyInviteFn || verifyDiscordInvite;
     this.includeBroadMatches = options.includeBroadMatches ?? false;
+    this.timedSecondsPerDepth = options.timedSecondsPerDepth ?? 12;
+    this.timedMaxRequests = options.timedMaxRequests ?? 192;
+    this.previouslySeenInvites = options.previouslySeenInvites;
     this.isSimulated = options.isSimulated ?? (options.primaryProvider.name === 'mock');
   }
 
@@ -64,12 +74,12 @@ export class SearchOrchestrator {
     onProgress?: (progress: SearchJobProgress) => void | Promise<void>
   ): Promise<OrchestrationResult> {
     const timedMode = params.depth === 5 || params.depth === 10 || params.depth === 20;
-    const timeBudgetMs = timedMode ? params.depth * 12000 : 0;
+    const timeBudgetMs = timedMode ? params.depth * this.timedSecondsPerDepth * 1000 : 0;
     const deadline = timedMode ? Date.now() + timeBudgetMs : Infinity;
     // Leave time to verify candidates after the provider search closes.
     const searchDeadline = deadline - timeBudgetMs / 3;
     const queryBudget = params.depth === 5 ? 36 : params.depth === 10 ? 60 : 96;
-    const plan = timedMode ? this.queryPlanner.generatePlan(params, queryBudget) : this.queryPlanner.generatePlan(params);
+    const plan = timedMode ? this.queryPlanner.generatePlan(params, Math.min(queryBudget, this.timedMaxRequests)) : this.queryPlanner.generatePlan(params);
     const withinDeadline = async <T>(end: number, operation: () => Promise<T>): Promise<T> => {
       if (!timedMode) return operation();
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -145,15 +155,19 @@ export class SearchOrchestrator {
       mock: 0,
     };
 
+    let timedRequests = 0;
     const disabledProviders = new Set<SearchProvider>();
     const search = async (provider: SearchProvider | undefined, item: QueryPlanItem): Promise<ProviderSearchResult | undefined> => {
       if (Date.now() >= searchDeadline || !provider || disabledProviders.has(provider) || !provider.isAvailable()) return undefined;
 
+      if (timedMode && timedRequests >= this.timedMaxRequests) return undefined;
+      if (timedMode) timedRequests++;
       providerUsage[provider.name] = (providerUsage[provider.name] || 0) + 1;
       const result = await withinDeadline(searchDeadline, () => provider.search(item.query, {
         language: item.language,
         country: params.country,
         depth: params.depth === 2 ? 2 : 1,
+        includePageContent: timedMode && provider.name === 'tavily',
       })).catch((error: unknown): ProviderSearchResult => ({
         provider: provider.name,
         query: item.query,
@@ -185,7 +199,7 @@ export class SearchOrchestrator {
     // Execute queries in bounded concurrent batches
     const runQueries = async (queries: QueryPlanItem[]) => {
       for (let i = 0; i < queries.length; i += this.maxConcurrent) {
-        if (Date.now() >= searchDeadline) break;
+        if (Date.now() >= searchDeadline || (timedMode && timedRequests >= this.timedMaxRequests)) break;
         const batch = queries.slice(i, i + this.maxConcurrent);
 
         await Promise.all(
@@ -195,7 +209,9 @@ export class SearchOrchestrator {
 
             try {
               const primaryResult = await search(this.primaryProvider, item);
-              const secondaryResult = succeeded(primaryResult) && primaryResult?.items.length
+              const secondaryResult = succeeded(primaryResult) && primaryResult?.items.length &&
+                (!timedMode || primaryResult.items.some(({ title, snippet, url }) =>
+                  sourceAllowed(url) && extractDiscordInvites(`${title}\n${snippet}\n${url}`, url, primaryResult.provider).length))
                 ? undefined : await search(this.secondaryProvider, item);
               const searchResult = succeeded(secondaryResult) ? secondaryResult
                 : succeeded(primaryResult) ? primaryResult : undefined;
@@ -213,15 +229,22 @@ export class SearchOrchestrator {
               }
               progress.queriesSuccessful++;
 
-              progress.sourceHits = (progress.sourceHits ?? 0) + searchResult.items.length;
+              const resultSets = timedMode && succeeded(primaryResult) && primaryResult && searchResult !== primaryResult
+                ? [primaryResult, searchResult] : [searchResult];
+              progress.sourceHits = (progress.sourceHits ?? 0) + resultSets.reduce((count, result) => count + result.items.length, 0);
 
               // Extract invites from search snippets and links
-              for (const itemResult of searchResult.items) {
+              for (const { items, provider } of resultSets) for (const itemResult of items) {
                 const sourcePlatform = identifySourcePlatform(itemResult.url);
                 if (!sourceAllowed(itemResult.url)) continue;
                 recordSource(itemResult.url);
                 const combinedText = `${itemResult.title}\n${itemResult.snippet}\n${itemResult.url}`;
-                const extracted = extractDiscordInvites(combinedText, itemResult.url, searchResult.provider);
+                const extracted = extractDiscordInvites(combinedText, itemResult.url, provider);
+                if (itemResult.pageContent) {
+                  const existingCodes = new Set(extracted.map(({ code }) => code));
+                  extracted.push(...extractDiscordInvites(itemResult.pageContent, itemResult.url, provider)
+                    .filter(({ code }) => !existingCodes.has(code)));
+                }
 
                 if (extracted.length > 0) {
                   for (const invite of extracted) {
@@ -385,8 +408,35 @@ export class SearchOrchestrator {
       });
     };
 
+    const rankForDisplay = () => {
+      const strictMatches = rankCandidates();
+      const strictActive = strictMatches.filter(({ invite }) => invite.status === 'valid');
+      let ranked = strictMatches;
+      if (this.includeBroadMatches) {
+        const identity = ({ invite }: RankedInviteResult) =>
+          invite.community?.id ? 'guild:' + invite.community.id : 'invite:' + invite.code;
+        const matched = new Set(strictActive.map(identity));
+        for (const result of strictActive) result.scoreBreakdown.preferenceMatch = true;
+        const broad = rankInviteResults(verifiedList.filter(({ invite }) =>
+          !params.minMembers || (invite.community?.approximateMemberCount ?? -1) >= params.minMembers
+        ), params.topics, params.languages, { strictFilter: false });
+        for (const result of broad) result.scoreBreakdown.preferenceMatch = matched.has(identity(result));
+        ranked = [
+          ...strictActive,
+          ...broad.filter((result) => result.invite.status === 'valid' && !matched.has(identity(result)) && hasTradingCommunityEvidence(result)),
+          ...broad.filter(({ invite }) => invite.status !== 'valid'),
+        ];
+      }
+      return { ranked, strictActive };
+    };
+
     const checkInvites = async (budget: number) => {
-      const targetCodes = orderedCandidates().slice(0, budget);
+      const candidates = orderedCandidates();
+      const seen = timedMode && candidates.length > 0 && this.previouslySeenInvites
+        ? await withinDeadline(deadline, () => this.previouslySeenInvites!(candidates.map(([code]) => code))).catch(() => new Set<string>())
+        : new Set<string>();
+      const targetCodes = candidates.sort(([a], [b]) =>
+        Number(seen.has('invite:' + a)) - Number(seen.has('invite:' + b))).slice(0, budget);
       progress.stage = 'verifying';
       progress.verificationPlanned = progress.invitesChecked + targetCodes.length;
       await onProgress?.({ ...progress });
@@ -426,6 +476,9 @@ export class SearchOrchestrator {
           });
         }
 
+        if (timedMode && onProgress && (progress.invitesChecked === 1 || progress.invitesChecked % 5 === 0)) {
+          progress.verifiedFindings = rankForDisplay().ranked.filter(({ invite }) => invite.status === 'valid').slice(0, params.limit);
+        }
         await onProgress?.({ ...progress });
         if (progress.discordVerificationRateLimited) break;
         if (progress.invitesChecked >= initialBudget && progress.invitesChecked % params.limit === 0) {
@@ -443,24 +496,7 @@ export class SearchOrchestrator {
       await checkInvites(verificationBudget - progress.invitesChecked);
     }
     progress.uncheckedInvites = discoveredInvitesMap.size - progress.invitesChecked;
-    const strictMatches = rankCandidates();
-    const strictActive = strictMatches.filter(({ invite }) => invite.status === 'valid');
-    let ranked = strictMatches;
-    if (this.includeBroadMatches) {
-      const identity = ({ invite }: RankedInviteResult) =>
-        invite.community?.id ? 'guild:' + invite.community.id : 'invite:' + invite.code;
-      const matched = new Set(strictActive.map(identity));
-      for (const result of strictActive) result.scoreBreakdown.preferenceMatch = true;
-      const broad = rankInviteResults(verifiedList.filter(({ invite }) =>
-        !params.minMembers || (invite.community?.approximateMemberCount ?? -1) >= params.minMembers
-      ), params.topics, params.languages, { strictFilter: false });
-      for (const result of broad) result.scoreBreakdown.preferenceMatch = matched.has(identity(result));
-      ranked = [
-        ...strictActive,
-        ...broad.filter((result) => result.invite.status === 'valid' && !matched.has(identity(result))),
-        ...broad.filter(({ invite }) => invite.status !== 'valid'),
-      ];
-    }
+    const { ranked, strictActive } = rankForDisplay();
     for (const r of ranked) {
       if (this.isSimulated) {
         r.isSimulated = true;
@@ -480,6 +516,7 @@ export class SearchOrchestrator {
         .filter((result) => result.countryEvidence?.status === 'unknown')
         .slice(0, 5);
     }
+    if (timedMode && onProgress) progress.verifiedFindings = finalResults.filter(({ invite }) => invite.status === 'valid');
     progress.stage = 'saving';
     await onProgress?.({ ...progress });
 

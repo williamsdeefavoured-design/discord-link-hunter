@@ -229,3 +229,24 @@ it.each([[5, 36], [10, 60], [20, 96]])('plans up to %i× discovery with the expa
   expect(result.plannedQueries).toHaveLength(expected);
   expect(search).not.toHaveBeenCalled();
 });
+
+it('keeps exact then broader active results, rejects unrelated guilds, and caps provider calls', async () => {
+  const search = vi.fn(async (query: string) => ({
+    provider: 'tavily' as const, query, statusCode: 200, durationMs: 1,
+    items: [{ url: 'https://reddit.com/r/markets/comments/public', title: 'Market communities', snippet: '',
+      pageContent: 'https://discord.gg/broad https://discord.gg/exact https://discord.gg/game https://discord.gg/expired' }],
+  }));
+  const output = await new SearchOrchestrator({
+    primaryProvider: { name: 'tavily', search, isAvailable: () => true, getDailyRequestCount: () => 0 },
+    includeBroadMatches: true, timedMaxRequests: 1,
+    verifyInviteFn: async (code) => ({
+      ...invite(code, code === 'game' ? 'Welcome to our anime and gaming community' : code === 'broad'
+        ? 'Welcome to our stock market discussion' : 'Welcome to our forex currency trading community'),
+      status: code === 'expired' ? 'expired_or_revoked' : 'valid',
+    }),
+  }).executeJob({ topics: ['forex'], languages: ['en'], targetPlatforms: ['reddit'], limit: 10, depth: 5 });
+  expect(search).toHaveBeenCalledTimes(1);
+  expect(output.results.map(({ invite }) => invite.code)).toEqual(['exact', 'broad', 'expired']);
+  expect(output.results.slice(0, 2).map(({ scoreBreakdown }) => scoreBreakdown.preferenceMatch)).toEqual([true, false]);
+  expect(output.results[1].sources[0].sourceUrl).toBe('https://reddit.com/r/markets/comments/public');
+});

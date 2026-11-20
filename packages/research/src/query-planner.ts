@@ -114,7 +114,7 @@ export class QueryPlanner {
     });
     const maxVariants = Math.max(...combinations.map(({ variants }) => variants.length));
 
-    const inviteIntents = params.depth >= 5 ? ['', 'invite', 'join', 'discord.gg'] : [''];
+    const inviteIntents = params.depth >= 5 ? ['', 'invite', 'join', 'discord.gg', 'trading journal community', 'market analysis group'] : [''];
     const roundsPerIntent = combinations.length * maxVariants;
     for (let round = 0; round < roundsPerIntent * inviteIntents.length; round++) {
       for (const [targetIndex, target] of targetsToUse.entries()) {
