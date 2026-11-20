@@ -42,8 +42,8 @@ export default function DiscoverPage() {
   const [targetPlatforms, setTargetPlatforms] = useState<string[]>([]);
   const [country, setCountry] = useState('all');
   const [countrySearch, setCountrySearch] = useState('');
-  const [limit, setLimit] = useState(10);
-  const depth = limit;
+  const [depth, setDepth] = useState(10);
+  const limit = depth === 5 ? 15 : depth === 10 ? 30 : 50;
   const mode = 'live' as const;
   const dryRun = false;
   const [loading, setLoading] = useState(false);
@@ -219,13 +219,13 @@ export default function DiscoverPage() {
             </label>
             <select
               id="limit"
-              value={limit}
-              onChange={(e) => setLimit(Number(e.target.value))}
+              value={depth}
+              onChange={(e) => setDepth(Number(e.target.value))}
               className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
             >
-              <option value={5}>5× · Up to 5 communities · ~30 seconds</option>
-              <option value={10}>10× · Up to 10 communities · ~1 minute</option>
-              <option value={20}>20× Extended · Up to 20 communities · ~2 minutes</option>
+              <option value={5}>5× · Up to 15 communities · ~1 minute</option>
+              <option value={10}>10× · Up to 30 communities · ~2 minutes</option>
+              <option value={20}>20× Extended · Up to 50 communities · ~4 minutes</option>
             </select>
           </div>
 

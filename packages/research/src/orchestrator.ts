@@ -64,11 +64,11 @@ export class SearchOrchestrator {
     onProgress?: (progress: SearchJobProgress) => void | Promise<void>
   ): Promise<OrchestrationResult> {
     const timedMode = params.depth === 5 || params.depth === 10 || params.depth === 20;
-    const timeBudgetMs = timedMode ? params.depth * 6000 : 0;
+    const timeBudgetMs = timedMode ? params.depth * 12000 : 0;
     const deadline = timedMode ? Date.now() + timeBudgetMs : Infinity;
     // Leave time to verify candidates after the provider search closes.
     const searchDeadline = deadline - timeBudgetMs / 3;
-    const queryBudget = params.depth === 5 ? 24 : params.depth === 10 ? 36 : 48;
+    const queryBudget = params.depth === 5 ? 36 : params.depth === 10 ? 60 : 96;
     const plan = timedMode ? this.queryPlanner.generatePlan(params, queryBudget) : this.queryPlanner.generatePlan(params);
     const withinDeadline = async <T>(end: number, operation: () => Promise<T>): Promise<T> => {
       if (!timedMode) return operation();
@@ -368,7 +368,7 @@ export class SearchOrchestrator {
     // Keep the initial verification budget. Check an additional bounded set
     // only when the strict, deduplicated results are still below the limit.
     const initialBudget = params.limit * 2;
-    const verificationBudget = Math.max(initialBudget, Math.min(params.limit * 4, 60));
+    const verificationBudget = timedMode ? params.limit * 4 : Math.max(initialBudget, Math.min(params.limit * 4, 60));
     let countryExcludedCount = 0;
     let relevanceExcludedCount = 0;
     const rankCandidates = () => {
